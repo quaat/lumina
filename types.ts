@@ -18,11 +18,25 @@ export interface MidiTrack {
   isMuted: boolean;
 }
 
+export interface TempoEvent {
+  ticks: number;
+  bpm: number;
+  time: number;
+}
+
+export interface TimeSignatureEvent {
+  ticks: number;
+  time: number;
+  numerator: number;
+  denominator: number;
+}
+
 export interface MidiData {
   header: {
     name: string;
     tempo: number;
-    timeSignatures: { time: number; numerator: number; denominator: number }[];
+    timeSignatures: TimeSignatureEvent[];
+    tempos: TempoEvent[];
   };
   duration: number;
   tracks: MidiTrack[];
@@ -39,6 +53,12 @@ export interface PlaybackState {
 }
 
 export interface MidiOutputDevice {
+  id: string;
+  name: string;
+  manufacturer?: string;
+}
+
+export interface MidiInputDevice {
   id: string;
   name: string;
   manufacturer?: string;

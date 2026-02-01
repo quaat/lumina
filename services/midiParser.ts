@@ -47,9 +47,15 @@ export const parseMidiFile = async (file: File): Promise<MidiData> => {
       name: midi.name || file.name,
       tempo: midi.header.tempos[0]?.bpm || 120,
       timeSignatures: midi.header.timeSignatures.map(ts => ({
+        ticks: ts.ticks,
         time: ts.time,
         numerator: ts.timeSignature[0],
         denominator: ts.timeSignature[1]
+      })),
+      tempos: midi.header.tempos.map(t => ({
+        ticks: t.ticks,
+        bpm: t.bpm,
+        time: t.time
       })),
     },
     duration: midi.duration,

@@ -1,25 +1,35 @@
 import React from 'react';
-import { MidiTrack, MidiOutputDevice, MidiOutputSettings } from '../types';
-import { Eye, EyeOff, Volume2, VolumeX, Music, Settings, Upload } from 'lucide-react';
+import { MidiTrack, MidiOutputDevice, MidiInputDevice, MidiOutputSettings } from '../types';
+import { Eye, EyeOff, Volume2, VolumeX, Music, Settings, Upload, Info } from 'lucide-react';
 
 interface SidebarProps {
   tracks: MidiTrack[];
   midiDevices: MidiOutputDevice[];
+  inputDevices: MidiInputDevice[];
   settings: MidiOutputSettings;
+  selectedInputId: string | null;
   onUpdateSettings: (s: MidiOutputSettings) => void;
+  onUpdateInput: (id: string | null) => void;
   onToggleTrackMute: (id: number) => void;
   onToggleTrackHide: (id: number) => void;
   onFileUpload: (file: File) => void;
+  onShowInfo: () => void;
+  hasMidiData: boolean;
 }
 
 const Sidebar: React.FC<SidebarProps> = ({
   tracks,
   midiDevices,
+  inputDevices,
   settings,
+  selectedInputId,
   onUpdateSettings,
+  onUpdateInput,
   onToggleTrackMute,
   onToggleTrackHide,
-  onFileUpload
+  onFileUpload,
+  onShowInfo,
+  hasMidiData
 }) => {
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -38,6 +48,15 @@ const Sidebar: React.FC<SidebarProps> = ({
           <h1 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-400">
             Lumina
           </h1>
+          {hasMidiData && (
+            <button 
+              onClick={onShowInfo}
+              className="ml-auto p-1.5 text-zinc-400 hover:text-primary hover:bg-zinc-800 rounded transition-colors"
+              title="File Info"
+            >
+              <Info size={16} />
+            </button>
+          )}
         </div>
 
         <label className="flex items-center justify-center w-full px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-sm text-zinc-300 rounded-md cursor-pointer border border-zinc-700 transition-colors">
@@ -51,12 +70,13 @@ const Sidebar: React.FC<SidebarProps> = ({
       <div className="p-4 border-b border-zinc-800 bg-zinc-900/50">
         <div className="flex items-center gap-2 text-sm text-zinc-400 mb-3">
           <Settings size={14} />
-          <span className="font-semibold tracking-wider uppercase text-[10px]">MIDI Output</span>
+          <span className="font-semibold tracking-wider uppercase text-[10px]">Settings</span>
         </div>
         
-        <div className="space-y-3">
+        <div className="space-y-4">
+          {/* Output Section */}
           <div>
-            <label className="block text-xs text-zinc-500 mb-1">Device</label>
+            <label className="block text-xs text-zinc-500 mb-1 font-medium">MIDI Output</label>
             <select 
               value={settings.deviceId || ''}
               onChange={(e) => onUpdateSettings({ ...settings, deviceId: e.target.value })}
@@ -67,31 +87,46 @@ const Sidebar: React.FC<SidebarProps> = ({
                 <option key={d.id} value={d.id}>{d.name}</option>
               ))}
             </select>
+            
+            <div className="flex gap-2 mt-2">
+               <div className="flex-1">
+                  <label className="block text-[10px] text-zinc-600 mb-1">Channel</label>
+                  <select 
+                    value={settings.outputChannel}
+                    onChange={(e) => onUpdateSettings({ ...settings, outputChannel: e.target.value === 'original' ? 'original' : parseInt(e.target.value) })}
+                    className="w-full bg-zinc-950 text-zinc-300 text-xs p-1.5 rounded border border-zinc-800 focus:border-primary outline-none"
+                  >
+                    <option value="original">Keep Original</option>
+                    {[...Array(16)].map((_, i) => (
+                      <option key={i} value={i + 1}>Ch {i + 1}</option>
+                    ))}
+                  </select>
+               </div>
+               <div className="flex-1">
+                  <label className="block text-[10px] text-zinc-600 mb-1">Latency ({settings.latencyCompensation}ms)</label>
+                  <input 
+                    type="range" min="-100" max="200" step="10"
+                    value={settings.latencyCompensation}
+                    onChange={(e) => onUpdateSettings({...settings, latencyCompensation: parseInt(e.target.value)})}
+                    className="w-full mt-2 h-1 bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-zinc-500"
+                  />
+               </div>
+            </div>
           </div>
 
-          <div className="flex gap-2">
-             <div className="flex-1">
-                <label className="block text-xs text-zinc-500 mb-1">Channel</label>
-                <select 
-                  value={settings.outputChannel}
-                  onChange={(e) => onUpdateSettings({ ...settings, outputChannel: e.target.value === 'original' ? 'original' : parseInt(e.target.value) })}
-                  className="w-full bg-zinc-950 text-zinc-300 text-xs p-2 rounded border border-zinc-800 focus:border-primary outline-none"
-                >
-                  <option value="original">Keep Original</option>
-                  {[...Array(16)].map((_, i) => (
-                    <option key={i} value={i + 1}>Ch {i + 1}</option>
-                  ))}
-                </select>
-             </div>
-             <div className="flex-1">
-                <label className="block text-xs text-zinc-500 mb-1">Latency ({settings.latencyCompensation}ms)</label>
-                <input 
-                  type="range" min="-100" max="200" step="10"
-                  value={settings.latencyCompensation}
-                  onChange={(e) => onUpdateSettings({...settings, latencyCompensation: parseInt(e.target.value)})}
-                  className="w-full mt-2 h-1 bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-zinc-500"
-                />
-             </div>
+          {/* Input Section */}
+           <div>
+            <label className="block text-xs text-zinc-500 mb-1 font-medium">MIDI Input (Remote Control)</label>
+            <select 
+              value={selectedInputId || ''}
+              onChange={(e) => onUpdateInput(e.target.value || null)}
+              className="w-full bg-zinc-950 text-zinc-300 text-xs p-2 rounded border border-zinc-800 focus:border-secondary outline-none"
+            >
+              <option value="">-- No Input --</option>
+              {inputDevices.map(d => (
+                <option key={d.id} value={d.id}>{d.name}</option>
+              ))}
+            </select>
           </div>
         </div>
       </div>

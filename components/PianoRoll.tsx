@@ -1,5 +1,6 @@
-import React, { useRef, useEffect, useState } from 'react';
-import { MidiData, MidiNote } from '../types';
+import React, { useRef, useEffect, useState, useMemo } from 'react';
+import { MidiData } from '../types';
+import { KeyLayout, FIRST_KEY, KEYS_COUNT } from '../services/KeyLayout';
 
 interface PianoRollProps {
   midiData: MidiData;
@@ -7,23 +8,26 @@ interface PianoRollProps {
   isPlaying: boolean;
   zoom: number; // Pixels per second
   activeNotes: Set<string>; // Keys that are currently playing (trackId:noteNumber)
+  debugMode?: boolean;
 }
-
-const KEYS_COUNT = 88;
-const FIRST_KEY = 21; // A0
-const WHITE_KEY_WIDTH_PCT = 100 / 52; // 52 white keys
-const BLACK_KEY_WIDTH_PCT = WHITE_KEY_WIDTH_PCT * 0.6;
 
 const PianoRoll: React.FC<PianoRollProps> = ({ 
   midiData, 
   currentTime, 
   isPlaying, 
   zoom,
-  activeNotes
+  activeNotes,
+  debugMode = false
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
+
+  // Instantiate layout engine when width changes
+  const layout = useMemo(() => {
+    if (dimensions.width === 0) return null;
+    return new KeyLayout(dimensions.width);
+  }, [dimensions.width]);
 
   // Handle Resize
   useEffect(() => {
@@ -47,7 +51,7 @@ const PianoRoll: React.FC<PianoRollProps> = ({
   // Main Render Loop
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!canvas || !layout) return;
 
     const ctx = canvas.getContext('2d', { alpha: false });
     if (!ctx) return;
@@ -59,43 +63,8 @@ const PianoRoll: React.FC<PianoRollProps> = ({
     ctx.resetTransform();
     ctx.scale(pixelRatio, pixelRatio);
 
-    // Helpers for geometry
     const KEYBOARD_HEIGHT = 100;
     const ROLL_HEIGHT = height - KEYBOARD_HEIGHT;
-    
-    // Key geometry
-    const whiteKeys: number[] = [];
-    const blackKeys: number[] = [];
-    // Populate MIDI note numbers into white/black buckets based on pattern
-    const isBlackKey = (midi: number) => {
-      const k = midi % 12;
-      return k === 1 || k === 3 || k === 6 || k === 8 || k === 10;
-    };
-
-    for(let i = FIRST_KEY; i < FIRST_KEY + KEYS_COUNT; i++) {
-        if(isBlackKey(i)) blackKeys.push(i);
-        else whiteKeys.push(i);
-    }
-
-    const whiteKeyWidth = width / 52;
-    const blackKeyWidth = whiteKeyWidth * 0.65;
-
-    const getNoteX = (midi: number) => {
-        if (midi < FIRST_KEY || midi >= FIRST_KEY + KEYS_COUNT) return -100;
-        
-        let whiteKeyIndex = 0;
-        for(let i=FIRST_KEY; i<midi; i++) {
-            if(!isBlackKey(i)) whiteKeyIndex++;
-        }
-        
-        const x = whiteKeyIndex * whiteKeyWidth;
-        if(isBlackKey(midi)) {
-            return x + (whiteKeyWidth * 0.65); // Offset for black key
-        }
-        return x;
-    };
-    
-    const getNoteWidth = (midi: number) => isBlackKey(midi) ? blackKeyWidth : whiteKeyWidth - 1;
 
     // --- DRAW FUNCTION ---
     const draw = () => {
@@ -103,32 +72,38 @@ const PianoRoll: React.FC<PianoRollProps> = ({
       ctx.fillStyle = '#18181b'; // zinc-900 (surface)
       ctx.fillRect(0, 0, width, height);
 
-      // 2. Draw Grid (Lanes)
+      // 2. Draw Grid (Lanes - based on White Keys)
       ctx.fillStyle = '#27272a'; // zinc-800
-      for (let i = 0; i < 52; i++) {
-        if (i % 2 === 0) { // Slight subtle striping
-             ctx.fillRect(i * whiteKeyWidth, 0, whiteKeyWidth, ROLL_HEIGHT);
+      
+      // We iterate the layout to draw grid lines
+      for (let i = FIRST_KEY; i < FIRST_KEY + KEYS_COUNT; i++) {
+        const rect = layout.getKeyRect(i);
+        if (!rect) continue;
+
+        if (!rect.isBlack) {
+            // Draw lane background/striping
+            // Check if it's an even white key index for striping?
+            // Simple logic: just draw borders
         }
       }
+
       // Vertical line markers for octaves
       ctx.strokeStyle = '#3f3f46';
       ctx.lineWidth = 1;
       ctx.beginPath();
-      for(let i=0; i<52; i+=7) {
-          ctx.moveTo(i * whiteKeyWidth, 0);
-          ctx.lineTo(i * whiteKeyWidth, ROLL_HEIGHT);
+      // Find C's
+      for (let i = FIRST_KEY; i < FIRST_KEY + KEYS_COUNT; i++) {
+         if (i % 12 === 0) { // C
+            const rect = layout.getKeyRect(i);
+            if (rect) {
+                ctx.moveTo(rect.x, 0);
+                ctx.lineTo(rect.x, ROLL_HEIGHT);
+            }
+         }
       }
       ctx.stroke();
 
       // 3. Draw Notes
-      // Culling: Only draw notes that are visible on screen
-      // Visible time range: [currentTime, currentTime + (ROLL_HEIGHT / zoom)]
-      // Note Y position = ROLL_HEIGHT - (note.time - currentTime) * zoom
-      // Notes fall DOWN, so t=0 is at top? No, "falling towards keyboard".
-      // Keyboard is at bottom.
-      // Note(t = current) should be at ROLL_HEIGHT (hitting the keys).
-      // Note(t = current + 1) should be at ROLL_HEIGHT - 1*zoom.
-      
       const timeWindow = ROLL_HEIGHT / zoom;
       const viewStart = currentTime;
       const viewEnd = currentTime + timeWindow;
@@ -137,25 +112,16 @@ const PianoRoll: React.FC<PianoRollProps> = ({
         if (track.isHidden || track.isMuted) return;
 
         ctx.fillStyle = track.color;
-        // Optimization: In a real app with 10k notes, use binary search here.
-        // For < 5000 notes, linear filter is usually fine on modern JS engines.
         
         for (const note of track.notes) {
-            // Check visibility overlap
             if (note.time > viewEnd || (note.time + note.duration) < viewStart) {
                 continue;
             }
 
-            const x = getNoteX(note.midi);
+            const x = layout.getNoteX(note.midi);
+            const w = layout.getNoteWidth(note.midi);
+            
             if (x < 0) continue;
-            
-            const w = getNoteWidth(note.midi);
-            
-            // Calculate Y. 
-            // When note.time == currentTime, bottom of note should be at ROLL_HEIGHT.
-            // distance_from_impact = (note.time - currentTime) * zoom
-            // y_bottom = ROLL_HEIGHT - distance_from_impact
-            // y_top = y_bottom - (note.duration * zoom)
             
             const distFromImpact = (note.time - currentTime) * zoom;
             const yBottom = ROLL_HEIGHT - distFromImpact;
@@ -169,75 +135,126 @@ const PianoRoll: React.FC<PianoRollProps> = ({
             // Note internal highlight
             ctx.fillStyle = '#ffffff';
             ctx.globalAlpha = 0.3;
-            ctx.fillRect(x, yTop, w, 2); // Top shine
+            ctx.fillRect(x, yTop, w, 2); 
             ctx.globalAlpha = 1.0;
             ctx.fillStyle = track.color;
+
+            // --- DEBUG OVERLAY (Note Level) ---
+            if (debugMode) {
+                const rect = layout.getKeyRect(note.midi);
+                if (rect) {
+                    ctx.save();
+                    // Draw connection line to key center
+                    ctx.strokeStyle = 'rgba(255, 255, 0, 0.5)';
+                    ctx.lineWidth = 1;
+                    ctx.beginPath();
+                    ctx.moveTo(x + w/2, yBottom);
+                    ctx.lineTo(rect.centerX, ROLL_HEIGHT);
+                    ctx.stroke();
+                    
+                    // Draw text info on the note
+                    if (barHeight > 10) {
+                        ctx.fillStyle = 'white';
+                        ctx.font = '10px monospace';
+                        ctx.fillText(`${note.midi}`, x, yBottom - 2);
+                    }
+                    ctx.restore();
+                }
+            }
         }
       });
 
       // 4. Draw Keyboard
       const kY = ROLL_HEIGHT;
       
-      // Draw White Keys
-      whiteKeys.forEach(note => {
-          const x = getNoteX(note);
-          // Highlight if active
-          let isActive = false;
-          midiData.tracks.forEach(t => {
-              if(!t.isMuted && activeNotes.has(`${t.id}:${note}`)) isActive = true;
-          });
+      // Draw Keys using Layout
+      // Two passes: White then Black
+      
+      // Pass 1: White
+      for (let i = FIRST_KEY; i < FIRST_KEY + KEYS_COUNT; i++) {
+        const rect = layout.getKeyRect(i);
+        if (!rect || rect.isBlack) continue;
 
-          if (isActive) {
-              ctx.fillStyle = '#60a5fa'; // Active color
-              // Bloom effect
-              ctx.shadowColor = '#3b82f6';
-              ctx.shadowBlur = 15;
-          } else {
-              ctx.fillStyle = '#f4f4f5'; // zinc-100
-              ctx.shadowBlur = 0;
-          }
-          
-          ctx.fillRect(x + 1, kY, whiteKeyWidth - 2, KEYBOARD_HEIGHT);
-          ctx.shadowBlur = 0; // Reset
-      });
+        let isActive = false;
+        midiData.tracks.forEach(t => {
+            if(!t.isMuted && activeNotes.has(`${t.id}:${i}`)) isActive = true;
+        });
+        if (activeNotes.has(`input:${i}`)) isActive = true;
 
-      // Draw Black Keys (on top)
-      blackKeys.forEach(note => {
-          const x = getNoteX(note);
-           let isActive = false;
-          midiData.tracks.forEach(t => {
-              if(!t.isMuted && activeNotes.has(`${t.id}:${note}`)) isActive = true;
-          });
+        if (isActive) {
+            ctx.fillStyle = '#60a5fa';
+            ctx.shadowColor = '#3b82f6';
+            ctx.shadowBlur = 15;
+        } else {
+            ctx.fillStyle = '#f4f4f5';
+            ctx.shadowBlur = 0;
+        }
+        
+        ctx.fillRect(rect.x + 1, kY, rect.width - 2, KEYBOARD_HEIGHT);
+        ctx.shadowBlur = 0;
 
-          if (isActive) {
-               ctx.fillStyle = '#60a5fa';
-               ctx.shadowColor = '#3b82f6';
-               ctx.shadowBlur = 15;
-          } else {
-              ctx.fillStyle = '#18181b'; // zinc-900
-              ctx.shadowBlur = 0;
-          }
-          
-          ctx.fillRect(x, kY, blackKeyWidth, KEYBOARD_HEIGHT * 0.65);
-          ctx.shadowBlur = 0;
-      });
+        // Debug Key Label
+        if (debugMode) {
+             ctx.fillStyle = '#999';
+             ctx.font = '9px monospace';
+             ctx.fillText(`${i}`, rect.x + 2, kY + KEYBOARD_HEIGHT - 5);
+        }
+      }
+
+      // Pass 2: Black
+      for (let i = FIRST_KEY; i < FIRST_KEY + KEYS_COUNT; i++) {
+        const rect = layout.getKeyRect(i);
+        if (!rect || !rect.isBlack) continue;
+
+        let isActive = false;
+        midiData.tracks.forEach(t => {
+            if(!t.isMuted && activeNotes.has(`${t.id}:${i}`)) isActive = true;
+        });
+        if (activeNotes.has(`input:${i}`)) isActive = true;
+
+        if (isActive) {
+             ctx.fillStyle = '#60a5fa';
+             ctx.shadowColor = '#3b82f6';
+             ctx.shadowBlur = 15;
+        } else {
+            ctx.fillStyle = '#18181b';
+            ctx.shadowBlur = 0;
+        }
+        
+        ctx.fillRect(rect.x, kY, rect.width, KEYBOARD_HEIGHT * 0.65);
+        ctx.shadowBlur = 0;
+
+        if (debugMode) {
+             ctx.fillStyle = '#555'; // Darker text on black key (which is actually black) - wait, key is black. Text should be white-ish.
+             ctx.fillStyle = '#ccc';
+             ctx.font = '9px monospace';
+             ctx.fillText(`${i}`, rect.x + 1, kY + 10);
+        }
+      }
       
       // Top border of keyboard
-      ctx.fillStyle = '#ef4444'; // Red line (The "Now" line)
+      ctx.fillStyle = '#ef4444'; 
       ctx.fillRect(0, ROLL_HEIGHT, width, 2);
 
+      // Debug: Draw vertical alignment lines for all keys
+      if (debugMode) {
+          ctx.globalAlpha = 0.2;
+          ctx.strokeStyle = 'cyan';
+          for (let i = FIRST_KEY; i < FIRST_KEY + KEYS_COUNT; i++) {
+              const rect = layout.getKeyRect(i);
+              if (rect) {
+                  ctx.beginPath();
+                  ctx.moveTo(rect.centerX, 0);
+                  ctx.lineTo(rect.centerX, height);
+                  ctx.stroke();
+              }
+          }
+          ctx.globalAlpha = 1.0;
+      }
     };
 
     draw();
-    // We don't need requestAnimationFrame here because the parent component
-    // drives the re-renders via the 'currentTime' prop update which triggers this effect.
-    // However, for super smooth visuals independent of React render cycle, 
-    // we would typically use a ref for currentTime and a RAF loop. 
-    // Given the constraints and React structure, let's keep it simple: 
-    // The parent updates `currentTime` via state, triggering re-render.
-    // OPTIMIZATION: If this lags, move draw() to a RAF loop and use a ref for time.
-    
-  }, [dimensions, midiData, currentTime, zoom, activeNotes]);
+  }, [dimensions, midiData, currentTime, zoom, activeNotes, layout, debugMode]);
 
   return (
     <div ref={containerRef} className="w-full h-full bg-background relative overflow-hidden">

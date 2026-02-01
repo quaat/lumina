@@ -1,8 +1,13 @@
-import { MidiOutputDevice } from '../types';
+import { MidiOutputDevice, MidiInputDevice } from '../types';
+
+type MidiMessageCallback = (message: MIDIMessageEvent) => void;
 
 export class WebMidiService {
   private access: MIDIAccess | null = null;
   private outputs: Map<string, MIDIOutput> = new Map();
+  private inputs: Map<string, MIDIInput> = new Map();
+  private messageListeners: Set<MidiMessageCallback> = new Set();
+  private activeInputId: string | null = null;
 
   async initialize(): Promise<void> {
     if (!navigator.requestMIDIAccess) {
@@ -10,9 +15,9 @@ export class WebMidiService {
     }
     try {
       this.access = await navigator.requestMIDIAccess({ sysex: false });
-      this.updateOutputs();
+      this.updatePorts();
       this.access.onstatechange = () => {
-        this.updateOutputs();
+        this.updatePorts();
       };
     } catch (err) {
       console.error('MIDI Access Failed', err);
@@ -20,11 +25,19 @@ export class WebMidiService {
     }
   }
 
-  private updateOutputs() {
+  private updatePorts() {
     this.outputs.clear();
+    this.inputs.clear();
     if (this.access) {
       this.access.outputs.forEach((output) => {
         this.outputs.set(output.id, output);
+      });
+      this.access.inputs.forEach((input) => {
+        this.inputs.set(input.id, input);
+        // If this input was already active, re-attach listener
+        if (input.id === this.activeInputId) {
+          input.onmidimessage = this.handleMidiMessage.bind(this);
+        }
       });
     }
   }
@@ -41,16 +54,54 @@ export class WebMidiService {
     return devices;
   }
 
+  getInputs(): MidiInputDevice[] {
+    const devices: MidiInputDevice[] = [];
+    this.inputs.forEach((input) => {
+      devices.push({
+        id: input.id,
+        name: input.name || 'Unknown Device',
+        manufacturer: input.manufacturer,
+      });
+    });
+    return devices;
+  }
+
+  setInput(deviceId: string | null) {
+    // Cleanup old input
+    if (this.activeInputId) {
+      const oldInput = this.inputs.get(this.activeInputId);
+      if (oldInput) oldInput.onmidimessage = null;
+    }
+
+    this.activeInputId = deviceId;
+
+    if (deviceId) {
+      const newInput = this.inputs.get(deviceId);
+      if (newInput) {
+        newInput.onmidimessage = this.handleMidiMessage.bind(this);
+      }
+    }
+  }
+
+  addMessageListener(callback: MidiMessageCallback) {
+    this.messageListeners.add(callback);
+  }
+
+  removeMessageListener(callback: MidiMessageCallback) {
+    this.messageListeners.delete(callback);
+  }
+
+  private handleMidiMessage(event: MIDIMessageEvent) {
+    this.messageListeners.forEach(listener => listener(event));
+  }
+
   sendNoteOn(deviceId: string, channel: number, note: number, velocity: number, timestamp?: number) {
     const output = this.outputs.get(deviceId);
     if (!output) return;
 
-    // MIDI Note On: 0x90 + channel (0-15)
-    // Velocity is 0-127. If velocity is 0-1, it's effectively note off on some synths, but standard is >0
     const status = 0x90 + (Math.max(0, Math.min(15, channel - 1)));
     const data = [status, Math.floor(note), Math.floor(velocity * 127)];
     
-    // timestamp is DOMHighResTimeStamp (performance.now())
     output.send(data, timestamp);
   }
 
@@ -58,7 +109,6 @@ export class WebMidiService {
     const output = this.outputs.get(deviceId);
     if (!output) return;
 
-    // MIDI Note Off: 0x80 + channel
     const status = 0x80 + (Math.max(0, Math.min(15, channel - 1)));
     const data = [status, Math.floor(note), 0];
     
@@ -74,9 +124,7 @@ export class WebMidiService {
       : [Math.max(0, Math.min(15, (channel as number) - 1))];
 
     channelsToSend.forEach(ch => {
-      // All Notes Off (CC 123)
       output.send([0xB0 + ch, 123, 0]);
-      // All Sound Off (CC 120) - harder reset
       output.send([0xB0 + ch, 120, 0]);
     });
   }

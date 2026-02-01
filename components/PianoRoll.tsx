@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useState, useMemo } from 'react';
 import { MidiData } from '../types';
-import { KeyLayout, FIRST_KEY, KEYS_COUNT } from '../services/KeyLayout';
+import { KeyLayout } from '../services/KeyLayout';
 
 interface PianoRollProps {
   midiData: MidiData;
@@ -9,6 +9,7 @@ interface PianoRollProps {
   zoom: number; // Pixels per second
   activeNotes: Set<string>; // Keys that are currently playing (trackId:noteNumber)
   debugMode?: boolean;
+  range: { min: number; max: number };
 }
 
 const PianoRoll: React.FC<PianoRollProps> = ({ 
@@ -17,17 +18,18 @@ const PianoRoll: React.FC<PianoRollProps> = ({
   isPlaying, 
   zoom,
   activeNotes,
-  debugMode = false
+  debugMode = false,
+  range
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
 
-  // Instantiate layout engine when width changes
+  // Instantiate layout engine when width or range changes
   const layout = useMemo(() => {
     if (dimensions.width === 0) return null;
-    return new KeyLayout(dimensions.width);
-  }, [dimensions.width]);
+    return new KeyLayout(dimensions.width, range.min, range.max);
+  }, [dimensions.width, range.min, range.max]);
 
   // Handle Resize
   useEffect(() => {
@@ -75,15 +77,15 @@ const PianoRoll: React.FC<PianoRollProps> = ({
       // 2. Draw Grid (Lanes - based on White Keys)
       ctx.fillStyle = '#27272a'; // zinc-800
       
+      const { min, max } = layout.getRange();
+
       // We iterate the layout to draw grid lines
-      for (let i = FIRST_KEY; i < FIRST_KEY + KEYS_COUNT; i++) {
+      for (let i = min; i <= max; i++) {
         const rect = layout.getKeyRect(i);
         if (!rect) continue;
-
+        // Don't draw grid for notes completely off screen if logic allows (layout handles this usually)
         if (!rect.isBlack) {
-            // Draw lane background/striping
-            // Check if it's an even white key index for striping?
-            // Simple logic: just draw borders
+           // Simple borders
         }
       }
 
@@ -92,7 +94,7 @@ const PianoRoll: React.FC<PianoRollProps> = ({
       ctx.lineWidth = 1;
       ctx.beginPath();
       // Find C's
-      for (let i = FIRST_KEY; i < FIRST_KEY + KEYS_COUNT; i++) {
+      for (let i = min; i <= max; i++) {
          if (i % 12 === 0) { // C
             const rect = layout.getKeyRect(i);
             if (rect) {
@@ -114,14 +116,19 @@ const PianoRoll: React.FC<PianoRollProps> = ({
         ctx.fillStyle = track.color;
         
         for (const note of track.notes) {
+            // Culling: Time
             if (note.time > viewEnd || (note.time + note.duration) < viewStart) {
                 continue;
             }
+            // Culling: Pitch (rough)
+            if (note.midi < min || note.midi > max) continue;
 
             const x = layout.getNoteX(note.midi);
             const w = layout.getNoteWidth(note.midi);
             
-            if (x < 0) continue;
+            // Layout might return off-screen coordinates, usually fine for canvas to clip,
+            // but we can skip if completely out
+            if (x + w < 0 || x > width) continue;
             
             const distFromImpact = (note.time - currentTime) * zoom;
             const yBottom = ROLL_HEIGHT - distFromImpact;
@@ -152,7 +159,6 @@ const PianoRoll: React.FC<PianoRollProps> = ({
                     ctx.lineTo(rect.centerX, ROLL_HEIGHT);
                     ctx.stroke();
                     
-                    // Draw text info on the note
                     if (barHeight > 10) {
                         ctx.fillStyle = 'white';
                         ctx.font = '10px monospace';
@@ -167,11 +173,8 @@ const PianoRoll: React.FC<PianoRollProps> = ({
       // 4. Draw Keyboard
       const kY = ROLL_HEIGHT;
       
-      // Draw Keys using Layout
-      // Two passes: White then Black
-      
       // Pass 1: White
-      for (let i = FIRST_KEY; i < FIRST_KEY + KEYS_COUNT; i++) {
+      for (let i = min; i <= max; i++) {
         const rect = layout.getKeyRect(i);
         if (!rect || rect.isBlack) continue;
 
@@ -202,7 +205,7 @@ const PianoRoll: React.FC<PianoRollProps> = ({
       }
 
       // Pass 2: Black
-      for (let i = FIRST_KEY; i < FIRST_KEY + KEYS_COUNT; i++) {
+      for (let i = min; i <= max; i++) {
         const rect = layout.getKeyRect(i);
         if (!rect || !rect.isBlack) continue;
 
@@ -225,7 +228,6 @@ const PianoRoll: React.FC<PianoRollProps> = ({
         ctx.shadowBlur = 0;
 
         if (debugMode) {
-             ctx.fillStyle = '#555'; // Darker text on black key (which is actually black) - wait, key is black. Text should be white-ish.
              ctx.fillStyle = '#ccc';
              ctx.font = '9px monospace';
              ctx.fillText(`${i}`, rect.x + 1, kY + 10);
@@ -240,7 +242,7 @@ const PianoRoll: React.FC<PianoRollProps> = ({
       if (debugMode) {
           ctx.globalAlpha = 0.2;
           ctx.strokeStyle = 'cyan';
-          for (let i = FIRST_KEY; i < FIRST_KEY + KEYS_COUNT; i++) {
+          for (let i = min; i <= max; i++) {
               const rect = layout.getKeyRect(i);
               if (rect) {
                   ctx.beginPath();

@@ -5,13 +5,18 @@ import Sidebar from './components/Sidebar';
 import PlaybackControls from './components/PlaybackControls';
 import PianoRoll from './components/PianoRoll';
 import MidiInfoModal from './components/MidiInfoModal';
+import PitchRangeControls from './components/PitchRangeControls';
 import { MidiData, MidiOutputDevice, MidiInputDevice, MidiOutputSettings } from './types';
 import { Loader2, Bug, TestTube } from 'lucide-react';
-import { FIRST_KEY, KEYS_COUNT } from './services/KeyLayout';
+import { DEFAULT_MIN_KEY, DEFAULT_MAX_KEY } from './services/KeyLayout';
 
 // Scheduler constants
 const LOOKAHEAD = 100; // ms to look ahead
 const SCHEDULE_INTERVAL = 25; // ms frequency of scheduler
+
+// Constants for Zoom
+const MIN_SPAN = 12; // Minimum 1 octave
+const PADDING = 4; // Semitones padding for auto-fit
 
 // Undo/Redo State shape
 interface PlaybackHistoryState {
@@ -20,6 +25,13 @@ interface PlaybackHistoryState {
   playbackRate: number;
 }
 
+const noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+const midiToNoteName = (midi: number) => {
+  const note = noteNames[midi % 12];
+  const octave = Math.floor(midi / 12) - 1;
+  return `${note}${octave}`;
+};
+
 const App: React.FC = () => {
   // --- STATE ---
   const [midiData, setMidiData] = useState<MidiData | null>(null);
@@ -27,6 +39,10 @@ const App: React.FC = () => {
   const [showInfoModal, setShowInfoModal] = useState(false);
   const [debugMode, setDebugMode] = useState(false);
   
+  // Viewport / Zoom State
+  const [displayRange, setDisplayRange] = useState({ min: DEFAULT_MIN_KEY, max: DEFAULT_MAX_KEY });
+  const [autoFit, setAutoFit] = useState(true);
+
   // Playback State
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0); // For UI only
@@ -48,51 +64,128 @@ const App: React.FC = () => {
   });
   const [inputId, setInputId] = useState<string | null>(null);
 
-  // --- REFS (Mutable state for Audio Scheduler) ---
+  // --- REFS ---
   const startTimeRef = useRef<number>(0); 
   const pauseTimeRef = useRef<number>(0); 
   const nextNoteIndexRefs = useRef<number[]>([]); 
   const schedulerTimerRef = useRef<number | null>(null);
   const rafRef = useRef<number | null>(null);
 
+  // --- ZOOM / AUTO-FIT LOGIC ---
+
+  const computeAutoFitRange = useCallback((data: MidiData) => {
+    let min = data.pitchRange.min - PADDING;
+    let max = data.pitchRange.max + PADDING;
+
+    // Ensure minimum span
+    if (max - min < MIN_SPAN) {
+        const center = (min + max) / 2;
+        min = Math.floor(center - MIN_SPAN / 2);
+        max = Math.ceil(center + MIN_SPAN / 2);
+    }
+
+    // Clamp to valid MIDI (0-127)
+    min = Math.max(0, min);
+    max = Math.min(127, max);
+
+    // Optional: Snap to white keys for cleaner edges?
+    // KeyLayout handles black key start fine, but nice to preserve
+    
+    return { min, max };
+  }, []);
+
+  const handleZoom = (direction: 'in' | 'out') => {
+    // If auto-fit is on, disable it when user manually zooms
+    if (autoFit) setAutoFit(false);
+
+    const currentSpan = displayRange.max - displayRange.min;
+    const center = (displayRange.min + displayRange.max) / 2;
+    
+    let newSpan = direction === 'in' ? currentSpan * 0.8 : currentSpan * 1.25;
+    
+    // Limits
+    if (newSpan < MIN_SPAN) newSpan = MIN_SPAN;
+    if (newSpan > 128) newSpan = 128;
+
+    let newMin = Math.floor(center - newSpan / 2);
+    let newMax = Math.ceil(center + newSpan / 2);
+
+    // Clamp
+    if (newMin < 0) {
+        newMin = 0;
+        newMax = Math.min(127, newMin + newSpan);
+    }
+    if (newMax > 127) {
+        newMax = 127;
+        newMin = Math.max(0, newMax - newSpan);
+    }
+
+    setDisplayRange({ min: newMin, max: newMax });
+  };
+
+  const handleResetFit = () => {
+    if (midiData) {
+        setDisplayRange(computeAutoFitRange(midiData));
+        setAutoFit(true);
+    } else {
+        setDisplayRange({ min: DEFAULT_MIN_KEY, max: DEFAULT_MAX_KEY });
+    }
+  };
+
+  const handleFullRange = () => {
+      setAutoFit(false);
+      setDisplayRange({ min: DEFAULT_MIN_KEY, max: DEFAULT_MAX_KEY });
+  };
+
   // --- DEBUG / TEST ---
   const loadTestPattern = () => {
     handleStop(false);
     
+    // Generate notes only in mid range (e.g. C3 to C5)
+    // C3 = 48, C5 = 72
+    const MIN_TEST = 48;
+    const MAX_TEST = 72;
+
     const notes = [];
-    // Chromatic run from FIRST_KEY to end
-    for (let i = 0; i < KEYS_COUNT; i++) {
+    for (let i = MIN_TEST; i <= MAX_TEST; i++) {
         notes.push({
-            midi: FIRST_KEY + i,
-            time: i * 0.2,
+            midi: i,
+            time: (i - MIN_TEST) * 0.2,
             duration: 0.15,
             velocity: 0.8,
             trackId: 0,
-            name: `Note ${FIRST_KEY + i}`
+            name: `Note ${i}`
         });
     }
 
     const testMidi: MidiData = {
         header: {
-            name: "Alignment Test Pattern",
+            name: "Mid-Range Test Pattern",
             tempo: 120,
             timeSignatures: [],
             tempos: []
         },
-        duration: KEYS_COUNT * 0.2 + 1,
+        duration: (MAX_TEST - MIN_TEST) * 0.2 + 1,
         tracks: [{
             id: 0,
-            name: "Chromatic Scale",
+            name: "Mid Range Scale",
             instrument: "Test",
             channel: 0,
             color: "#3b82f6",
             notes: notes,
             isHidden: false,
             isMuted: false
-        }]
+        }],
+        pitchRange: { min: MIN_TEST, max: MAX_TEST }
     };
     
     setMidiData(testMidi);
+    
+    // Auto-fit immediately for test pattern
+    const fit = computeAutoFitRange(testMidi);
+    setDisplayRange(fit);
+    setAutoFit(true);
+
     setCurrentTime(0);
     pauseTimeRef.current = 0;
     nextNoteIndexRefs.current = [0];
@@ -120,7 +213,6 @@ const App: React.FC = () => {
     // Apply State
     setPlaybackRate(previous.playbackRate);
     
-    // Seek logic
     if (isPlaying) {
         setIsPlaying(false);
         if (outputSettings.deviceId) webMidiService.panic(outputSettings.deviceId, outputSettings.outputChannel);
@@ -130,7 +222,6 @@ const App: React.FC = () => {
     resetPointers(previous.currentTime);
 
     if (previous.isPlaying) {
-        // Resume
         setTimeout(() => {
             const now = performance.now();
             startTimeRef.current = now - (previous.currentTime * 1000 / previous.playbackRate);
@@ -149,7 +240,6 @@ const App: React.FC = () => {
     setHistory(prev => [...prev, current]);
     setFuture(prev => prev.slice(1));
 
-    // Apply State
     setPlaybackRate(next.playbackRate);
     
     if (isPlaying) {
@@ -206,7 +296,6 @@ const App: React.FC = () => {
       if (!e.data) return;
       const [status, data1, data2] = e.data;
       const command = status & 0xF0;
-      // const channel = status & 0x0F;
 
       // Transport Control (Realtime messages)
       if (status === 0xFA || status === 0xFB) { // Start or Continue
@@ -219,12 +308,11 @@ const App: React.FC = () => {
         const noteId = `input:${data1}`;
         setActiveNotes(prev => new Set(prev).add(noteId));
         
-        // Thru to output?
         if (outputSettings.deviceId) {
            webMidiService.sendNoteOn(outputSettings.deviceId, outputSettings.outputChannel === 'original' ? 1 : outputSettings.outputChannel as number, data1, data2);
         }
       } 
-      // Note Off (0x80 or 0x90 with vel 0)
+      // Note Off
       else if (command === 0x80 || (command === 0x90 && data2 === 0)) {
         const noteId = `input:${data1}`;
         setActiveNotes(prev => {
@@ -342,7 +430,7 @@ const App: React.FC = () => {
       const songTime = ((now - startTimeRef.current) / 1000) * playbackRate;
       setCurrentTime(songTime);
       if (midiData && songTime >= midiData.duration) {
-        handleStop(false); // don't save history on auto-stop
+        handleStop(false); 
       } else {
         rafRef.current = requestAnimationFrame(loop);
       }
@@ -359,7 +447,6 @@ const App: React.FC = () => {
   const handleFileUpload = async (file: File) => {
     setLoading(true);
     handleStop(false);
-    // Clear history on new file
     setHistory([]);
     setFuture([]);
     
@@ -369,6 +456,12 @@ const App: React.FC = () => {
       nextNoteIndexRefs.current = new Array(parsed.tracks.length).fill(0);
       setCurrentTime(0);
       pauseTimeRef.current = 0;
+      
+      // Auto fit on load
+      const fit = computeAutoFitRange(parsed);
+      setDisplayRange(fit);
+      setAutoFit(true);
+
     } catch (e) {
       alert("Failed to parse MIDI file.");
       console.error(e);
@@ -380,7 +473,7 @@ const App: React.FC = () => {
   const handlePlayPause = () => {
     if (!midiData) return;
     
-    pushToHistory(); // Record state before toggle
+    pushToHistory(); 
 
     if (isPlaying) {
       setIsPlaying(false);
@@ -389,7 +482,6 @@ const App: React.FC = () => {
       const songTime = ((now - startTimeRef.current) / 1000) * playbackRate;
       pauseTimeRef.current = songTime;
       setActiveNotes(prev => {
-          // Keep input notes active, remove track notes
           const next = new Set<string>();
           prev.forEach(n => { if(n.startsWith('input:')) next.add(n); });
           return next;
@@ -410,7 +502,6 @@ const App: React.FC = () => {
     pauseTimeRef.current = 0;
     setCurrentTime(0);
     setActiveNotes(prev => {
-          // Keep input notes active
           const next = new Set<string>();
           prev.forEach(n => { if(n.startsWith('input:')) next.add(n); });
           return next;
@@ -491,7 +582,7 @@ const App: React.FC = () => {
         hasMidiData={!!midiData}
       />
       
-      {/* Debug Controls - Floating */}
+      {/* Debug Controls - Floating Right */}
       <div className="absolute top-4 right-4 z-50 flex gap-2">
          <button 
            onClick={() => setDebugMode(!debugMode)}
@@ -527,14 +618,30 @@ const App: React.FC = () => {
               <p>Upload a MIDI file in the sidebar to begin visualizing.</p>
             </div>
           ) : (
-            <PianoRoll 
-              midiData={midiData}
-              currentTime={currentTime}
-              isPlaying={isPlaying}
-              zoom={150} // Pixels per second
-              activeNotes={activeNotes}
-              debugMode={debugMode}
-            />
+            <>
+                <PitchRangeControls 
+                    range={displayRange}
+                    autoFit={autoFit}
+                    onToggleAutoFit={() => {
+                        if (!autoFit && midiData) setDisplayRange(computeAutoFitRange(midiData));
+                        setAutoFit(!autoFit);
+                    }}
+                    onZoomIn={() => handleZoom('in')}
+                    onZoomOut={() => handleZoom('out')}
+                    onReset={handleResetFit}
+                    onFullRange={handleFullRange}
+                    noteToName={midiToNoteName}
+                />
+                <PianoRoll 
+                  midiData={midiData}
+                  currentTime={currentTime}
+                  isPlaying={isPlaying}
+                  zoom={150} // Pixels per second
+                  activeNotes={activeNotes}
+                  debugMode={debugMode}
+                  range={displayRange}
+                />
+            </>
           )}
         </div>
 

@@ -16,16 +16,27 @@ const TRACK_COLORS = [
 export const parseMidiFile = async (file: File): Promise<MidiData> => {
   const arrayBuffer = await file.arrayBuffer();
   const midi = new Midi(arrayBuffer);
+  
+  let minNote = 127;
+  let maxNote = 0;
+  let hasNotes = false;
 
   const tracks: MidiTrack[] = midi.tracks.map((track, index) => {
-    const notes: MidiNote[] = track.notes.map((note) => ({
-      midi: note.midi,
-      time: note.time,
-      duration: note.duration,
-      velocity: note.velocity,
-      trackId: index,
-      name: note.name,
-    }));
+    const notes: MidiNote[] = track.notes.map((note) => {
+      // Update global pitch range
+      if (note.midi < minNote) minNote = note.midi;
+      if (note.midi > maxNote) maxNote = note.midi;
+      hasNotes = true;
+
+      return {
+        midi: note.midi,
+        time: note.time,
+        duration: note.duration,
+        velocity: note.velocity,
+        trackId: index,
+        name: note.name,
+      };
+    });
 
     return {
       id: index,
@@ -41,6 +52,12 @@ export const parseMidiFile = async (file: File): Promise<MidiData> => {
 
   // Filter out empty tracks
   const validTracks = tracks.filter((t) => t.notes.length > 0);
+
+  // Default range if no notes found (A0 to C8)
+  if (!hasNotes) {
+    minNote = 21;
+    maxNote = 108;
+  }
 
   return {
     header: {
@@ -60,5 +77,9 @@ export const parseMidiFile = async (file: File): Promise<MidiData> => {
     },
     duration: midi.duration,
     tracks: validTracks,
+    pitchRange: {
+      min: minNote,
+      max: maxNote
+    }
   };
 };

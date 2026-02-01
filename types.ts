@@ -40,6 +40,10 @@ export interface MidiData {
   };
   duration: number;
   tracks: MidiTrack[];
+  pitchRange: {
+    min: number;
+    max: number;
+  };
 }
 
 export interface PlaybackState {

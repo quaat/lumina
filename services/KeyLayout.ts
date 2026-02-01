@@ -1,6 +1,5 @@
-export const FIRST_KEY = 21; // A0
-export const KEYS_COUNT = 88;
-export const LAST_KEY = FIRST_KEY + KEYS_COUNT - 1; // C8
+export const DEFAULT_MIN_KEY = 21; // A0
+export const DEFAULT_MAX_KEY = 108; // C8
 
 export interface KeyGeometry {
   x: number;
@@ -12,16 +11,26 @@ export interface KeyGeometry {
 export class KeyLayout {
   private whiteKeyWidth: number;
   private blackKeyWidth: number;
-  private whiteKeyCount: number;
+  private minKey: number;
+  private maxKey: number;
   
   // Cache geometry to avoid recalculating per frame per note
   private keyCache: Map<number, KeyGeometry> = new Map();
 
-  constructor(width: number) {
-    // Calculate total white keys in standard 88-key range (A0 to C8)
-    // A0, B0, ... C8
-    this.whiteKeyCount = 52; 
-    this.whiteKeyWidth = width / this.whiteKeyCount;
+  constructor(width: number, minKey: number = DEFAULT_MIN_KEY, maxKey: number = DEFAULT_MAX_KEY) {
+    this.minKey = minKey;
+    this.maxKey = maxKey;
+
+    // Calculate total white keys in the visible range
+    let whiteKeyCount = 0;
+    for (let i = minKey; i <= maxKey; i++) {
+        if (!this.isBlack(i)) whiteKeyCount++;
+    }
+    
+    // Fallback to prevent divide by zero if range is weird (e.g. only black keys)
+    if (whiteKeyCount === 0) whiteKeyCount = 1;
+
+    this.whiteKeyWidth = width / whiteKeyCount;
     this.blackKeyWidth = this.whiteKeyWidth * 0.65;
 
     this.precompute();
@@ -35,7 +44,14 @@ export class KeyLayout {
   private precompute() {
     let currentWhiteIndex = 0;
 
-    for (let i = FIRST_KEY; i <= LAST_KEY; i++) {
+    // If the view starts with black keys, we need to handle the offset logic carefully.
+    // However, the standard logic: "Black key is offset from the *next* white key" 
+    // usually works if we start currentWhiteIndex at 0.
+    // Example: MinKey is 22 (A#0).
+    // Loop 22 (Black): x = (0 * w) - (bW/2). Draws half off-screen to left. Correct.
+    // Loop 23 (B0 - White): x = 0 * w. Draws at 0. Correct.
+    
+    for (let i = this.minKey; i <= this.maxKey; i++) {
       const black = this.isBlack(i);
       
       let rect: KeyGeometry;
@@ -53,11 +69,6 @@ export class KeyLayout {
       } else {
         // Black key
         // Sits on the boundary between the previous white key and the next.
-        // The 'currentWhiteIndex' here actually points to the *next* white key 
-        // because we haven't incremented it for this black key.
-        // Example: A0 (white, idx 0). A#0 (black). 
-        // Boundary is at x = 1 * whiteKeyWidth.
-        
         const boundaryX = currentWhiteIndex * this.whiteKeyWidth;
         const x = boundaryX - (this.blackKeyWidth / 2);
         
@@ -80,26 +91,17 @@ export class KeyLayout {
   // Returns X coordinate for the visual center of the note (falling bar)
   public getNoteX(midi: number): number {
     const rect = this.keyCache.get(midi);
-    if (!rect) return -100;
-    
-    // For visualizer bars, we usually want them centered on the key, 
-    // or filling the key width.
-    if (rect.isBlack) {
-      return rect.x;
-    } else {
-      // For white keys, we might want to shrink the note bar slightly 
-      // so it doesn't overlap the black keys visually if using full width, 
-      // but 'x' is strictly correct for the slot.
-      return rect.x;
-    }
+    if (!rect) return -1000; // Return far off-screen
+    return rect.x;
   }
 
   public getNoteWidth(midi: number): number {
     const rect = this.keyCache.get(midi);
     if (!rect) return 0;
-    
-    // Optional: make white notes slightly narrower to see grid lines?
-    // Using full key width for now.
     return rect.isBlack ? rect.width : rect.width - 1;
+  }
+  
+  public getRange() {
+      return { min: this.minKey, max: this.maxKey };
   }
 }

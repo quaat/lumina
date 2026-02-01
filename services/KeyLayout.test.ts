@@ -1,4 +1,4 @@
-import { KeyLayout, FIRST_KEY, KEYS_COUNT } from './KeyLayout';
+import { KeyLayout, DEFAULT_MIN_KEY, DEFAULT_MAX_KEY } from './KeyLayout';
 
 // Add type definitions for test globals to satisfy the compiler
 declare const describe: (name: string, fn: () => void) => void;
@@ -14,14 +14,14 @@ describe('KeyLayout', () => {
     const whiteKeyWidth = WIDTH / 52; // 52 white keys in 88 key range
 
     test('should place A0 (first key) at 0', () => {
-        const rect = layout.getKeyRect(FIRST_KEY); // A0
+        const rect = layout.getKeyRect(DEFAULT_MIN_KEY); // A0
         expect(rect).toBeDefined();
         expect(rect?.x).toBeCloseTo(0);
         expect(rect?.isBlack).toBe(false);
     });
 
     test('should place C8 (last key) correctly', () => {
-        const lastKey = FIRST_KEY + KEYS_COUNT - 1; // C8
+        const lastKey = DEFAULT_MAX_KEY; // C8
         const rect = layout.getKeyRect(lastKey);
         expect(rect).toBeDefined();
         // C8 is the 52nd white key (index 51)
@@ -40,7 +40,7 @@ describe('KeyLayout', () => {
 
     test('monotonic ordering of keys', () => {
         let prevX = -1;
-        for (let i = FIRST_KEY; i < FIRST_KEY + KEYS_COUNT; i++) {
+        for (let i = DEFAULT_MIN_KEY; i <= DEFAULT_MAX_KEY; i++) {
             const rect = layout.getKeyRect(i);
             if(!rect) continue;
             // Center X should be strictly increasing
@@ -50,7 +50,7 @@ describe('KeyLayout', () => {
     });
 
     test('note X matches key X (or center)', () => {
-        for (let i = FIRST_KEY; i < FIRST_KEY + KEYS_COUNT; i++) {
+        for (let i = DEFAULT_MIN_KEY; i <= DEFAULT_MAX_KEY; i++) {
             const noteX = layout.getNoteX(i);
             const keyRect = layout.getKeyRect(i);
             // In our implementation, noteX is the left edge of the note bar.

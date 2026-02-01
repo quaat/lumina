@@ -1,0 +1,5 @@
+{
+  "name": "Lumina MIDI",
+  "description": "A stunning, high-performance MIDI visualizer and player with Web MIDI output routing.",
+  "requestFramePermissions": []
+}

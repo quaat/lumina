@@ -1,3 +1,4 @@
+
 export interface MidiNote {
   midi: number;
   time: number; // Start time in seconds
@@ -72,4 +73,15 @@ export interface MidiOutputSettings {
   deviceId: string | null;
   outputChannel: number | 'original'; // 'original' or 1-16
   latencyCompensation: number; // ms
+}
+
+export type ViewMode = 'classic' | 'highway';
+export type ColorMode = 'track' | 'note';
+
+export interface HighwaySettings {
+  lookahead: number; // Seconds visible ahead
+  farScale: number; // Perspective scale at horizon (0.0 - 1.0)
+  laneShading: boolean;
+  cameraHeight: number; // 0-1, tilts the hit plane
+  laneContrast: number; // 0.0 - 1.0, intensity of lane shading
 }

@@ -6,7 +6,8 @@ import PlaybackControls from './components/PlaybackControls';
 import PianoRoll from './components/PianoRoll';
 import MidiInfoModal from './components/MidiInfoModal';
 import PitchRangeControls from './components/PitchRangeControls';
-import { MidiData, MidiOutputDevice, MidiInputDevice, MidiOutputSettings } from './types';
+import ViewSettings from './components/ViewSettings';
+import { MidiData, MidiOutputDevice, MidiInputDevice, MidiOutputSettings, ViewMode, ColorMode, HighwaySettings } from './types';
 import { Loader2, Bug, TestTube } from 'lucide-react';
 import { DEFAULT_MIN_KEY, DEFAULT_MAX_KEY } from './services/KeyLayout';
 
@@ -42,6 +43,17 @@ const App: React.FC = () => {
   // Viewport / Zoom State
   const [displayRange, setDisplayRange] = useState({ min: DEFAULT_MIN_KEY, max: DEFAULT_MAX_KEY });
   const [autoFit, setAutoFit] = useState(true);
+
+  // Visualization Modes
+  const [viewMode, setViewMode] = useState<ViewMode>('highway');
+  const [colorMode, setColorMode] = useState<ColorMode>('note');
+  const [highwaySettings, setHighwaySettings] = useState<HighwaySettings>({
+      lookahead: 4.0,
+      farScale: 0.25,
+      laneShading: true,
+      cameraHeight: 0.5,
+      laneContrast: 0.5
+  });
 
   // Playback State
   const [isPlaying, setIsPlaying] = useState(false);
@@ -87,9 +99,6 @@ const App: React.FC = () => {
     // Clamp to valid MIDI (0-127)
     min = Math.max(0, min);
     max = Math.min(127, max);
-
-    // Optional: Snap to white keys for cleaner edges?
-    // KeyLayout handles black key start fine, but nice to preserve
     
     return { min, max };
   }, []);
@@ -141,8 +150,6 @@ const App: React.FC = () => {
   const loadTestPattern = () => {
     handleStop(false);
     
-    // Generate notes only in mid range (e.g. C3 to C5)
-    // C3 = 48, C5 = 72
     const MIN_TEST = 48;
     const MAX_TEST = 72;
 
@@ -195,10 +202,10 @@ const App: React.FC = () => {
   const pushToHistory = useCallback(() => {
     const currentState: PlaybackHistoryState = {
       isPlaying,
-      currentTime: pauseTimeRef.current || currentTime, // Use exact time
+      currentTime: pauseTimeRef.current || currentTime,
       playbackRate
     };
-    setHistory(prev => [...prev.slice(-19), currentState]); // Keep last 20
+    setHistory(prev => [...prev.slice(-19), currentState]); 
     setFuture([]);
   }, [isPlaying, currentTime, playbackRate]);
 
@@ -210,7 +217,6 @@ const App: React.FC = () => {
     setFuture(prev => [current, ...prev]);
     setHistory(prev => prev.slice(0, -1));
 
-    // Apply State
     setPlaybackRate(previous.playbackRate);
     
     if (isPlaying) {
@@ -351,7 +357,9 @@ const App: React.FC = () => {
     const lookAheadTime = songTime + (LOOKAHEAD / 1000) * playbackRate;
 
     midiData.tracks.forEach((track, trackIdx) => {
-      if (track.isMuted) return;
+      // Hidden tracks: No Audio, No Visuals. Skip entirely.
+      if (track.isHidden) return;
+      // Muted tracks: No Audio, BUT Visuals remain. Proceed to schedule visual updates, but skip sending MIDI.
 
       let nextIndex = nextNoteIndexRefs.current[trackIdx];
       
@@ -367,7 +375,8 @@ const App: React.FC = () => {
             const timeUntilNote = (note.time - songTime) / playbackRate;
             const absoluteScheduleTime = now + (timeUntilNote * 1000) + outputSettings.latencyCompensation;
             
-            if (outputSettings.deviceId) {
+            // Audio Output (Only if not muted)
+            if (!track.isMuted && outputSettings.deviceId) {
                webMidiService.sendNoteOn(
                  outputSettings.deviceId, 
                  outputSettings.outputChannel === 'original' ? track.channel + 1 : outputSettings.outputChannel as number,
@@ -385,6 +394,7 @@ const App: React.FC = () => {
                );
             }
             
+            // Visual Updates (Active Notes for Keys)
             const id = `${track.id}:${note.midi}`;
             const delayMs = Math.max(0, (note.time - songTime) * 1000 / playbackRate);
             const durationMs = (note.duration * 1000) / playbackRate;
@@ -457,7 +467,6 @@ const App: React.FC = () => {
       setCurrentTime(0);
       pauseTimeRef.current = 0;
       
-      // Auto fit on load
       const fit = computeAutoFitRange(parsed);
       setDisplayRange(fit);
       setAutoFit(true);
@@ -483,7 +492,9 @@ const App: React.FC = () => {
       pauseTimeRef.current = songTime;
       setActiveNotes(prev => {
           const next = new Set<string>();
-          prev.forEach(n => { if(n.startsWith('input:')) next.add(n); });
+          for (const n of prev) {
+            if (n.startsWith('input:')) next.add(n);
+          }
           return next;
       });
     } else {
@@ -503,7 +514,9 @@ const App: React.FC = () => {
     setCurrentTime(0);
     setActiveNotes(prev => {
           const next = new Set<string>();
-          prev.forEach(n => { if(n.startsWith('input:')) next.add(n); });
+          for (const n of prev) {
+            if (n.startsWith('input:')) next.add(n);
+          }
           return next;
       });
     
@@ -525,7 +538,9 @@ const App: React.FC = () => {
     setCurrentTime(time);
     setActiveNotes(prev => {
           const next = new Set<string>();
-          prev.forEach(n => { if(n.startsWith('input:')) next.add(n); });
+          for (const n of prev) {
+            if (n.startsWith('input:')) next.add(n);
+          }
           return next;
       });
 
@@ -551,6 +566,12 @@ const App: React.FC = () => {
 
   const toggleTrackMute = (id: number) => {
     if (!midiData) return;
+    
+    // Check if we need to panic for this track
+    if (outputSettings.deviceId && isPlaying) {
+        webMidiService.panic(outputSettings.deviceId, outputSettings.outputChannel);
+    }
+
     const newTracks = [...midiData.tracks];
     const track = newTracks.find(t => t.id === id);
     if (track) track.isMuted = !track.isMuted;
@@ -561,7 +582,27 @@ const App: React.FC = () => {
     if (!midiData) return;
     const newTracks = [...midiData.tracks];
     const track = newTracks.find(t => t.id === id);
-    if (track) track.isHidden = !track.isHidden;
+    
+    if (track) {
+        track.isHidden = !track.isHidden;
+        // Clean up active notes for this track immediately if hiding
+        if (track.isHidden) {
+            setActiveNotes(prev => {
+                const next = new Set(prev);
+                // Remove all notes starting with "id:"
+                Array.from(next).forEach((noteKey: string) => {
+                    if (noteKey.startsWith(`${id}:`)) {
+                        next.delete(noteKey);
+                    }
+                });
+                return next;
+            });
+            // Also stop sound
+             if (outputSettings.deviceId && isPlaying) {
+                webMidiService.panic(outputSettings.deviceId, outputSettings.outputChannel);
+            }
+        }
+    }
     setMidiData({ ...midiData, tracks: newTracks });
   };
 
@@ -599,6 +640,16 @@ const App: React.FC = () => {
            <TestTube size={18} />
          </button>
       </div>
+      
+      {/* View Settings Control */}
+      <ViewSettings 
+        viewMode={viewMode}
+        onViewModeChange={setViewMode}
+        colorMode={colorMode}
+        onColorModeChange={setColorMode}
+        highwaySettings={highwaySettings}
+        onUpdateHighwaySettings={setHighwaySettings}
+      />
 
       <div className="flex-1 flex flex-col relative">
         {loading && (
@@ -640,6 +691,9 @@ const App: React.FC = () => {
                   activeNotes={activeNotes}
                   debugMode={debugMode}
                   range={displayRange}
+                  viewMode={viewMode}
+                  colorMode={colorMode}
+                  highwaySettings={highwaySettings}
                 />
             </>
           )}

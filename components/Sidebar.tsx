@@ -142,13 +142,18 @@ const Sidebar: React.FC<SidebarProps> = ({
            </div>
          )}
          {tracks.map(track => (
-           <div key={track.id} className="group flex items-center p-2 rounded hover:bg-zinc-800/50 transition-colors border border-transparent hover:border-zinc-800">
+           <div 
+             key={track.id} 
+             className={`group flex items-center p-2 rounded hover:bg-zinc-800/50 transition-colors border border-transparent hover:border-zinc-800 ${track.isHidden ? 'opacity-40' : 'opacity-100'}`}
+           >
              <div 
                className="w-3 h-8 rounded-l mr-3" 
                style={{ backgroundColor: track.isMuted ? '#3f3f46' : track.color }}
              />
              <div className="flex-1 min-w-0">
-               <div className="text-xs font-medium text-zinc-200 truncate">{track.name}</div>
+               <div className={`text-xs font-medium truncate ${track.isHidden ? 'text-zinc-500 decoration-zinc-600 line-through' : 'text-zinc-200'}`}>
+                 {track.name}
+               </div>
                <div className="text-[10px] text-zinc-500 flex gap-2">
                  <span>{track.notes.length} notes</span>
                  <span>Ch {track.channel + 1}</span>
@@ -159,7 +164,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                <button 
                  onClick={() => onToggleTrackHide(track.id)}
                  className={`p-1.5 rounded hover:bg-zinc-700 ${track.isHidden ? 'text-zinc-600' : 'text-zinc-400'}`}
-                 title="Toggle Visibility"
+                 title={track.isHidden ? "Show Track" : "Hide Track"}
                >
                  {track.isHidden ? <EyeOff size={14} /> : <Eye size={14} />}
                </button>

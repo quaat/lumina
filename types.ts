@@ -84,4 +84,5 @@ export interface HighwaySettings {
   laneShading: boolean;
   cameraHeight: number; // 0-1, tilts the hit plane
   laneContrast: number; // 0.0 - 1.0, intensity of lane shading
+  keyboardMode: '3d' | '2d'; // Toggle for highway keyboard style
 }

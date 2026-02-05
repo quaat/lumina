@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { parseMidiFile } from './services/midiParser';
 import { webMidiService } from './services/webMidiService';
 import Sidebar from './components/Sidebar';
@@ -12,8 +12,9 @@ import AnalysisOverlay from './components/AnalysisOverlay';
 import { MidiData, MidiOutputDevice, MidiInputDevice, MidiOutputSettings, ViewMode, ColorMode, HighwaySettings } from './types';
 import { AnalysisSettings, AnalysisResult } from './analysis/analysisTypes';
 import { analyzeTimeline } from './analysis/analyzeTimeline';
-import { Loader2, Bug, TestTube, Minimize, Play, Pause } from 'lucide-react';
+import { Loader2, Minimize, Play, Pause } from 'lucide-react';
 import { DEFAULT_MIN_KEY, DEFAULT_MAX_KEY } from './services/KeyLayout';
+import { applyHighlightEvents, buildActiveNotesSet, clearHighlightsExceptInput, clearHighlightsForSource, createHighlightState, HighlightEvent } from './services/highlightState';
 
 // Scheduler constants
 const LOOKAHEAD = 100; // ms to look ahead
@@ -42,7 +43,7 @@ const App: React.FC = () => {
   const [midiData, setMidiData] = useState<MidiData | null>(null);
   const [loading, setLoading] = useState(false);
   const [showInfoModal, setShowInfoModal] = useState(false);
-  const [debugMode, setDebugMode] = useState(false);
+  const [debugMode] = useState(false);
   
   // Viewport / Zoom State
   const [displayRange, setDisplayRange] = useState({ min: DEFAULT_MIN_KEY, max: DEFAULT_MAX_KEY });
@@ -78,7 +79,8 @@ const App: React.FC = () => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0); // For UI only
   const [playbackRate, setPlaybackRate] = useState(1);
-  const [activeNotes, setActiveNotes] = useState<Set<string>>(new Set()); // trackId:noteNumber
+  const [highlightState, setHighlightState] = useState(() => createHighlightState());
+  const activeNotes = useMemo(() => buildActiveNotesSet(highlightState), [highlightState]);
   
   // History State
   const [history, setHistory] = useState<PlaybackHistoryState[]>([]);
@@ -101,6 +103,7 @@ const App: React.FC = () => {
   const nextNoteIndexRefs = useRef<number[]>([]); 
   const schedulerTimerRef = useRef<number | null>(null);
   const rafRef = useRef<number | null>(null);
+  const highlightQueueRef = useRef<Array<HighlightEvent>>([]);
 
   // --- ANALYSIS TRIGGER ---
   useEffect(() => {
@@ -273,6 +276,54 @@ const App: React.FC = () => {
     nextNoteIndexRefs.current = [0];
   };
 
+  const loadRepeatedNoteTestPattern = () => {
+    handleStop(false);
+
+    const notes = [
+      // Quick retrigger (staccato)
+      { midi: 60, time: 0.1, duration: 0.02, velocity: 0.8, trackId: 0, name: 'C4 (staccato 1)' },
+      { midi: 60, time: 0.16, duration: 0.02, velocity: 0.8, trackId: 0, name: 'C4 (staccato 2)' },
+      // Overlapping retrigger
+      { midi: 60, time: 0.1, duration: 0.08, velocity: 0.9, trackId: 0, name: 'C4 (overlap A)' },
+      { midi: 60, time: 0.14, duration: 0.08, velocity: 0.9, trackId: 0, name: 'C4 (overlap B)' }
+    ].sort((a, b) => (a.time - b.time) || (a.duration - b.duration));
+
+    const testMidi: MidiData = {
+      header: {
+        name: "Repeated Note Test",
+        tempo: 120,
+        timeSignatures: [],
+        tempos: []
+      },
+      duration: 1.0,
+      tracks: [{
+        id: 0,
+        name: "Repeated C4",
+        instrument: "Test",
+        channel: 0,
+        color: "#10b981",
+        notes,
+        isHidden: false,
+        isMuted: false
+      }],
+      pitchRange: { min: 54, max: 66 }
+    };
+
+    setMidiData(testMidi);
+
+    const fit = computeAutoFitRange(testMidi);
+    setDisplayRange(fit);
+    setAutoFit(true);
+
+    setCurrentTime(0);
+    pauseTimeRef.current = 0;
+    nextNoteIndexRefs.current = [0];
+  };
+
+  const clearScheduledHighlights = useCallback(() => {
+    highlightQueueRef.current = [];
+  }, []);
+
   // --- UNDO/REDO HELPERS ---
   const pushToHistory = useCallback(() => {
     const currentState: PlaybackHistoryState = {
@@ -297,6 +348,8 @@ const App: React.FC = () => {
     if (isPlaying) {
         setIsPlaying(false);
         if (outputSettings.deviceId) webMidiService.panic(outputSettings.deviceId, outputSettings.outputChannel);
+        clearScheduledHighlights();
+        setHighlightState(prev => clearHighlightsExceptInput(prev));
     }
     pauseTimeRef.current = previous.currentTime;
     setCurrentTime(previous.currentTime);
@@ -311,7 +364,7 @@ const App: React.FC = () => {
     } else {
         setIsPlaying(false);
     }
-  }, [history, isPlaying, currentTime, playbackRate, outputSettings, midiData]);
+  }, [history, isPlaying, currentTime, playbackRate, outputSettings, midiData, clearScheduledHighlights]);
 
   const performRedo = useCallback(() => {
     if (future.length === 0) return;
@@ -326,6 +379,8 @@ const App: React.FC = () => {
     if (isPlaying) {
         setIsPlaying(false);
         if (outputSettings.deviceId) webMidiService.panic(outputSettings.deviceId, outputSettings.outputChannel);
+        clearScheduledHighlights();
+        setHighlightState(prev => clearHighlightsExceptInput(prev));
     }
     pauseTimeRef.current = next.currentTime;
     setCurrentTime(next.currentTime);
@@ -340,7 +395,7 @@ const App: React.FC = () => {
     } else {
         setIsPlaying(false);
     }
-  }, [future, isPlaying, currentTime, playbackRate, outputSettings, midiData]);
+  }, [future, isPlaying, currentTime, playbackRate, outputSettings, midiData, clearScheduledHighlights]);
 
   // Keyboard Shortcuts
   useEffect(() => {
@@ -386,8 +441,12 @@ const App: React.FC = () => {
       } 
       // Note On
       else if (command === 0x90 && data2 > 0) {
-        const noteId = `input:${data1}`;
-        setActiveNotes(prev => new Set(prev).add(noteId));
+        setHighlightState(prev => applyHighlightEvents(prev, [{
+          type: 'on',
+          noteNumber: data1,
+          sourceKey: 'input',
+          timeMs: performance.now()
+        }]));
         
         if (outputSettings.deviceId) {
            webMidiService.sendNoteOn(outputSettings.deviceId, outputSettings.outputChannel === 'original' ? 1 : outputSettings.outputChannel as number, data1, data2);
@@ -395,12 +454,12 @@ const App: React.FC = () => {
       } 
       // Note Off
       else if (command === 0x80 || (command === 0x90 && data2 === 0)) {
-        const noteId = `input:${data1}`;
-        setActiveNotes(prev => {
-            const next = new Set(prev);
-            next.delete(noteId);
-            return next;
-        });
+        setHighlightState(prev => applyHighlightEvents(prev, [{
+          type: 'off',
+          noteNumber: data1,
+          sourceKey: 'input',
+          timeMs: performance.now()
+        }]));
         
          if (outputSettings.deviceId) {
            webMidiService.sendNoteOff(outputSettings.deviceId, outputSettings.outputChannel === 'original' ? 1 : outputSettings.outputChannel as number, data1);
@@ -423,6 +482,45 @@ const App: React.FC = () => {
       });
     }
   };
+
+  const flushHighlightQueue = useCallback((nowMs: number) => {
+    if (highlightQueueRef.current.length === 0) return;
+
+    const due: HighlightEvent[] = [];
+    const future: HighlightEvent[] = [];
+
+    for (const event of highlightQueueRef.current) {
+      if (event.timeMs <= nowMs) {
+        due.push(event);
+      } else {
+        future.push(event);
+      }
+    }
+
+    highlightQueueRef.current = future;
+    if (due.length === 0) return;
+
+    // Stable ordering for same-timestamp events:
+    // time asc, NOTE_OFF before NOTE_ON, then noteNumber to avoid flicker on retriggers.
+    due.sort((a, b) => {
+      if (a.timeMs !== b.timeMs) return a.timeMs - b.timeMs;
+      if (a.type !== b.type) return a.type === 'off' ? -1 : 1;
+      if (a.noteNumber !== b.noteNumber) return a.noteNumber - b.noteNumber;
+      return a.sourceKey.localeCompare(b.sourceKey);
+    });
+
+    if (debugMode && midiData?.header.name === 'Repeated Note Test') {
+      // Log event order for the repeated-note repro pattern.
+      console.debug('[Highlight] Dispatch order', due.map((event) => ({
+        timeMs: Math.round(event.timeMs),
+        type: event.type,
+        note: event.noteNumber,
+        source: event.sourceKey
+      })));
+    }
+
+    setHighlightState(prev => applyHighlightEvents(prev, due));
+  }, [debugMode, midiData]);
 
   const scheduleNotes = useCallback(() => {
     if (!midiData || !isPlaying) return;
@@ -464,32 +562,32 @@ const App: React.FC = () => {
                );
             }
             
-            const id = `${track.id}:${note.midi}`;
+            const sourceKey = String(track.id);
             const delayMs = Math.max(0, (note.time - songTime) * 1000 / playbackRate);
             const durationMs = (note.duration * 1000) / playbackRate;
-            
-            setTimeout(() => {
-                setActiveNotes(prev => {
-                    const next = new Set(prev);
-                    next.add(id);
-                    return next;
-                });
-            }, delayMs);
+            const onTimeMs = now + delayMs;
+            const offTimeMs = onTimeMs + durationMs;
 
-            setTimeout(() => {
-                setActiveNotes(prev => {
-                    const next = new Set(prev);
-                    next.delete(id);
-                    return next;
-                });
-            }, delayMs + durationMs);
+            highlightQueueRef.current.push({
+              type: 'on',
+              noteNumber: note.midi,
+              sourceKey,
+              timeMs: onTimeMs
+            });
+            highlightQueueRef.current.push({
+              type: 'off',
+              noteNumber: note.midi,
+              sourceKey,
+              timeMs: offTimeMs
+            });
         }
         nextIndex++;
       }
       nextNoteIndexRefs.current[trackIdx] = nextIndex;
     });
 
-  }, [midiData, isPlaying, playbackRate, outputSettings]);
+    flushHighlightQueue(now);
+  }, [midiData, isPlaying, playbackRate, outputSettings, flushHighlightQueue]);
 
   useEffect(() => {
     if (isPlaying) {
@@ -554,13 +652,8 @@ const App: React.FC = () => {
       const now = getNow();
       const songTime = ((now - startTimeRef.current) / 1000) * playbackRate;
       pauseTimeRef.current = songTime;
-      setActiveNotes(prev => {
-          const next = new Set<string>();
-          for (const n of prev) {
-            if (n.startsWith('input:')) next.add(n);
-          }
-          return next;
-      });
+      clearScheduledHighlights();
+      setHighlightState(prev => clearHighlightsExceptInput(prev));
     } else {
       const now = getNow();
       startTimeRef.current = now - (pauseTimeRef.current * 1000 / playbackRate);
@@ -574,13 +667,8 @@ const App: React.FC = () => {
     if (outputSettings.deviceId) webMidiService.panic(outputSettings.deviceId, outputSettings.outputChannel);
     pauseTimeRef.current = 0;
     setCurrentTime(0);
-    setActiveNotes(prev => {
-          const next = new Set<string>();
-          for (const n of prev) {
-            if (n.startsWith('input:')) next.add(n);
-          }
-          return next;
-      });
+    clearScheduledHighlights();
+    setHighlightState(prev => clearHighlightsExceptInput(prev));
     if (midiData) {
       nextNoteIndexRefs.current = new Array(midiData.tracks.length).fill(0);
     }
@@ -595,13 +683,8 @@ const App: React.FC = () => {
     }
     pauseTimeRef.current = time;
     setCurrentTime(time);
-    setActiveNotes(prev => {
-          const next = new Set<string>();
-          for (const n of prev) {
-            if (n.startsWith('input:')) next.add(n);
-          }
-          return next;
-      });
+    clearScheduledHighlights();
+    setHighlightState(prev => clearHighlightsExceptInput(prev));
     resetPointers(time);
     if (wasPlaying) {
         const now = getNow();
@@ -638,15 +721,9 @@ const App: React.FC = () => {
     if (track) {
         track.isHidden = !track.isHidden;
         if (track.isHidden) {
-            setActiveNotes(prev => {
-                const next = new Set(prev);
-                Array.from(next).forEach((noteKey: string) => {
-                    if (noteKey.startsWith(`${id}:`)) {
-                        next.delete(noteKey);
-                    }
-                });
-                return next;
-            });
+            const sourceKey = String(id);
+            highlightQueueRef.current = highlightQueueRef.current.filter(event => event.sourceKey !== sourceKey);
+            setHighlightState(prev => clearHighlightsForSource(prev, sourceKey));
              if (outputSettings.deviceId && isPlaying) {
                 webMidiService.panic(outputSettings.deviceId, outputSettings.outputChannel);
             }
@@ -674,25 +751,6 @@ const App: React.FC = () => {
         />
       )}
       
-      {/* Debug Controls - Floating Right */}
-      {!isVizFullscreen && (
-        <div className="absolute top-4 right-4 z-50 flex gap-2">
-           <button 
-             onClick={() => setDebugMode(!debugMode)}
-             className={`p-2 rounded shadow-lg transition-colors ${debugMode ? 'bg-red-600 text-white' : 'bg-zinc-800 text-zinc-400'}`}
-             title="Toggle Debug Overlay"
-           >
-             <Bug size={18} />
-           </button>
-           <button 
-             onClick={loadTestPattern}
-             className="p-2 bg-zinc-800 text-zinc-400 rounded shadow-lg hover:text-primary transition-colors"
-             title="Load Alignment Test"
-           >
-             <TestTube size={18} />
-           </button>
-        </div>
-      )}
       
       {/* View Settings Control */}
       {!isVizFullscreen && (

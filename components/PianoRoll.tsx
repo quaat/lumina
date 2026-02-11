@@ -137,6 +137,7 @@ const PianoRoll: React.FC<PianoRollProps> = ({
   const particlesRef = useRef(new ParticleSystem());
   const lastFrameRef = useRef(performance.now());
   const keyPressRef = useRef(new Map<number, number>());
+  const keyGlintRef = useRef(new Map<number, number>());
 
   // Fixed keyboard height - always visible
   const KEYBOARD_HEIGHT = 100;
@@ -677,47 +678,96 @@ const PianoRoll: React.FC<PianoRollProps> = ({
     const draw3DKeyboard = () => {
         if (!laneGeometry) return;
         const { keyboardKeys } = laneGeometry;
+        const now = performance.now() * 0.001;
+
+        const createPolyPath = (points: Point[]) => {
+            const path = new Path2D();
+            path.moveTo(points[0].x, points[0].y);
+            for (let i = 1; i < points.length; i++) path.lineTo(points[i].x, points[i].y);
+            path.closePath();
+            return path;
+        };
+
+        const drawPolyOverlay = (points: Point[], painter: () => void) => {
+            const path = createPolyPath(points);
+            ctx.save();
+            ctx.clip(path);
+            painter();
+            ctx.restore();
+        };
 
         // Gradients
-        // White Key Top
         const gradWhite = ctx.createLinearGradient(0, laneGeometry.impactY, 0, height);
-        gradWhite.addColorStop(0, '#d4d4d8'); // darker at back
-        gradWhite.addColorStop(1, '#ffffff'); // brighter at front
+        gradWhite.addColorStop(0, '#d9dce1');
+        gradWhite.addColorStop(0.38, '#f4f5f0');
+        gradWhite.addColorStop(0.75, '#fffdfa');
+        gradWhite.addColorStop(1, '#e2e5e9');
 
-        // Black Key Top
-        const gradBlack = ctx.createLinearGradient(0, laneGeometry.impactY, 0, height);
-        gradBlack.addColorStop(0, '#18181b');
-        gradBlack.addColorStop(1, '#27272a');
+        const gradBlack = ctx.createLinearGradient(0, laneGeometry.impactY - 8, 0, height);
+        gradBlack.addColorStop(0, '#474b51');
+        gradBlack.addColorStop(0.4, '#1f232a');
+        gradBlack.addColorStop(1, '#090b10');
 
         // Draw White Keys first
         keyboardKeys.filter(k => !k.isBlack).forEach(key => {
             const activeColors = getActiveColors(key.midi);
+            const pressAmount = keyPressRef.current.get(key.midi) ?? 0;
+            const shimmer = 0.5 + 0.5 * Math.sin(now * 0.75 + key.midi * 0.33);
+            const glint = keyGlintRef.current.get(key.midi) ?? 0;
 
             // Top Surface
             if (activeColors.length > 0) {
-                 ctx.fillStyle = activeColors[0];
                  drawPoly(key.topPoly, activeColors[0]);
 
                  // Glow
                  ctx.shadowColor = activeColors[0];
-                 ctx.shadowBlur = 15;
+                 ctx.shadowBlur = 15 + glint * 12;
                  drawPoly(key.topPoly, `rgba(255,255,255,0.4)`);
                  ctx.shadowBlur = 0;
             } else {
                  drawPoly(key.topPoly, gradWhite);
             }
 
+            drawPolyOverlay(key.topPoly, () => {
+                const yMin = Math.min(...key.topPoly.map(p => p.y));
+                const yMax = Math.max(...key.topPoly.map(p => p.y));
+                const xMin = Math.min(...key.topPoly.map(p => p.x));
+                const xMax = Math.max(...key.topPoly.map(p => p.x));
+
+                const lacquer = ctx.createLinearGradient(0, yMin, 0, yMax);
+                lacquer.addColorStop(0, `rgba(255,255,255,${0.3 + shimmer * 0.08 - pressAmount * 0.1})`);
+                lacquer.addColorStop(0.22, 'rgba(255,255,255,0.16)');
+                lacquer.addColorStop(0.72, 'rgba(255,255,255,0.04)');
+                lacquer.addColorStop(1, 'rgba(120,126,136,0.12)');
+                ctx.fillStyle = lacquer;
+                ctx.fillRect(xMin, yMin, xMax - xMin, yMax - yMin);
+
+                const streakX = xMin + (xMax - xMin) * ((now * 0.03 + key.midi * 0.07) % 1);
+                const streak = ctx.createLinearGradient(streakX - 28, yMin, streakX + 28, yMax);
+                streak.addColorStop(0, 'rgba(255,255,255,0)');
+                streak.addColorStop(0.5, `rgba(255,255,255,${0.14 + glint * 0.22})`);
+                streak.addColorStop(1, 'rgba(255,255,255,0)');
+                ctx.fillStyle = streak;
+                ctx.fillRect(xMin, yMin, xMax - xMin, yMax - yMin);
+            });
+
             // Front Face (Thickness)
-            drawPoly(key.frontPoly, '#a1a1aa'); // Darker grey for depth
+            const frontGrad = ctx.createLinearGradient(0, key.frontPoly[0].y, 0, key.frontPoly[2].y);
+            frontGrad.addColorStop(0, '#c7ccd4');
+            frontGrad.addColorStop(1, '#8d95a0');
+            drawPoly(key.frontPoly, frontGrad);
         });
 
         // Draw Black Keys on top
         keyboardKeys.filter(k => k.isBlack).forEach(key => {
             const activeColors = getActiveColors(key.midi);
+            const glint = keyGlintRef.current.get(key.midi) ?? 0;
+            const pressAmount = keyPressRef.current.get(key.midi) ?? 0;
+            const shimmer = 0.5 + 0.5 * Math.sin(now * 0.95 + key.midi * 0.41);
 
             // Shadow
             if (key.shadowPoly) {
-                drawPoly(key.shadowPoly, 'rgba(0,0,0,0.5)');
+                drawPoly(key.shadowPoly, 'rgba(0,0,0,0.34)');
             }
 
             // Top Surface
@@ -726,15 +776,39 @@ const PianoRoll: React.FC<PianoRollProps> = ({
                  drawPoly(key.topPoly, activeColors[0]);
 
                  ctx.shadowColor = activeColors[0];
-                 ctx.shadowBlur = 15;
+                 ctx.shadowBlur = 15 + glint * 10;
                  drawPoly(key.topPoly, `rgba(255,255,255,0.2)`);
                  ctx.shadowBlur = 0;
             } else {
                  drawPoly(key.topPoly, gradBlack);
             }
 
+            drawPolyOverlay(key.topPoly, () => {
+                const yMin = Math.min(...key.topPoly.map(p => p.y));
+                const yMax = Math.max(...key.topPoly.map(p => p.y));
+                const xMin = Math.min(...key.topPoly.map(p => p.x));
+                const xMax = Math.max(...key.topPoly.map(p => p.x));
+
+                const gloss = ctx.createLinearGradient(0, yMin, xMax, yMax);
+                gloss.addColorStop(0, `rgba(255,255,255,${0.22 + shimmer * 0.06})`);
+                gloss.addColorStop(0.28, 'rgba(255,255,255,0.08)');
+                gloss.addColorStop(0.6, 'rgba(255,255,255,0.01)');
+                gloss.addColorStop(1, 'rgba(0,0,0,0.18)');
+                ctx.fillStyle = gloss;
+                ctx.fillRect(xMin, yMin, xMax - xMin, yMax - yMin);
+
+                const edgeLight = ctx.createLinearGradient(xMin, yMin, xMin + (xMax - xMin) * 0.6, yMin);
+                edgeLight.addColorStop(0, `rgba(255,255,255,${0.16 + glint * 0.24 - pressAmount * 0.08})`);
+                edgeLight.addColorStop(1, 'rgba(255,255,255,0)');
+                ctx.fillStyle = edgeLight;
+                ctx.fillRect(xMin, yMin, xMax - xMin, (yMax - yMin) * 0.6);
+            });
+
             // Front Face
-            drawPoly(key.frontPoly, '#09090b'); // Very dark for black key front
+            const blackFront = ctx.createLinearGradient(0, key.frontPoly[0].y, 0, key.frontPoly[2].y);
+            blackFront.addColorStop(0, '#181a20');
+            blackFront.addColorStop(1, '#05070b');
+            drawPoly(key.frontPoly, blackFront);
         });
     };
 
@@ -765,6 +839,8 @@ const PianoRoll: React.FC<PianoRollProps> = ({
             };
         };
 
+        const now = performance.now() * 0.001;
+
         // Pass 1: White
         for (let i = min; i <= max; i++) {
             const rect = layout.getKeyRect(i);
@@ -774,7 +850,7 @@ const PianoRoll: React.FC<PianoRollProps> = ({
             const finalY = keyboardOriginY + rect.y;
 
             const pressAmount = updatePressAmount(i, colors.length > 0);
-            const pressScale = 1 - 0.03 * pressAmount;
+            const pressScale = 1 - 0.018 * pressAmount;
             const scaledRect = getScaledRect(rect.x + 1, finalY, rect.width - 2, rect.height, pressScale);
             if (colors.length > 0) {
                 if (colors.length === 1) {
@@ -792,6 +868,8 @@ const PianoRoll: React.FC<PianoRollProps> = ({
                 ctx.fillRect(scaledRect.x, scaledRect.y, scaledRect.w, scaledRect.h);
                 ctx.shadowBlur = 0;
 
+                keyGlintRef.current.set(i, Math.min(1, (keyGlintRef.current.get(i) ?? 0) + 0.22));
+
                 const grad = ctx.createLinearGradient(0, finalY, 0, finalY + rect.height);
                 grad.addColorStop(0, 'rgba(255,255,255,0.4)');
                 grad.addColorStop(1, 'rgba(255,255,255,0.0)');
@@ -799,11 +877,40 @@ const PianoRoll: React.FC<PianoRollProps> = ({
                 ctx.fillRect(scaledRect.x, scaledRect.y, scaledRect.w, scaledRect.h);
 
             } else {
-                ctx.fillStyle = '#f4f4f5';
+                const ivory = ctx.createLinearGradient(0, finalY, 0, finalY + rect.height);
+                ivory.addColorStop(0, '#fdfdf8');
+                ivory.addColorStop(0.38, '#f5f3eb');
+                ivory.addColorStop(0.82, '#ece9de');
+                ivory.addColorStop(1, '#d8d5cc');
+                ctx.fillStyle = ivory;
                 ctx.fillRect(rect.x + 1, finalY, rect.width - 2, rect.height);
-                ctx.fillStyle = '#e4e4e7';
-                ctx.fillRect(rect.x + 1, finalY + rect.height - 5, rect.width - 2, 5);
             }
+
+            const shimmer = 0.5 + 0.5 * Math.sin(now * 0.8 + i * 0.27);
+            const glint = keyGlintRef.current.get(i) ?? 0;
+            const sheen = ctx.createLinearGradient(rect.x, finalY, rect.x + rect.width, finalY + rect.height * 0.5);
+            sheen.addColorStop(0, 'rgba(255,255,255,0)');
+            sheen.addColorStop(0.45, `rgba(255,255,255,${0.08 + shimmer * 0.05 + glint * 0.18})`);
+            sheen.addColorStop(1, 'rgba(255,255,255,0)');
+            ctx.fillStyle = sheen;
+            ctx.fillRect(scaledRect.x, scaledRect.y, scaledRect.w, scaledRect.h * 0.75);
+
+            const topStrip = ctx.createLinearGradient(0, finalY, 0, finalY + rect.height * 0.2);
+            topStrip.addColorStop(0, `rgba(255,255,255,${0.38 - pressAmount * 0.15})`);
+            topStrip.addColorStop(1, 'rgba(255,255,255,0)');
+            ctx.fillStyle = topStrip;
+            ctx.fillRect(scaledRect.x, scaledRect.y, scaledRect.w, scaledRect.h * 0.2);
+
+            ctx.strokeStyle = 'rgba(120,120,135,0.28)';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(scaledRect.x + 0.5, scaledRect.y + 0.5, scaledRect.w - 1, scaledRect.h - 1);
+
+            ctx.fillStyle = 'rgba(0,0,0,0.1)';
+            ctx.fillRect(scaledRect.x, scaledRect.y + scaledRect.h - 3, scaledRect.w, 3);
+
+            const pressOffset = 1 + pressAmount * 2;
+            ctx.fillStyle = `rgba(0,0,0,${0.07 + pressAmount * 0.1})`;
+            ctx.fillRect(scaledRect.x + 1, scaledRect.y + scaledRect.h + pressOffset, scaledRect.w - 2, 2);
         }
 
         // Pass 2: Black
@@ -815,7 +922,7 @@ const PianoRoll: React.FC<PianoRollProps> = ({
             const finalY = keyboardOriginY + rect.y;
 
             const pressAmount = updatePressAmount(i, colors.length > 0);
-            const pressScale = 1 - 0.03 * pressAmount;
+            const pressScale = 1 - 0.02 * pressAmount;
             const scaledRect = getScaledRect(rect.x, finalY, rect.width, rect.height, pressScale);
             if (colors.length > 0) {
                  if (colors.length === 1) {
@@ -829,10 +936,12 @@ const PianoRoll: React.FC<PianoRollProps> = ({
                 }
                 ctx.shadowColor = colors[0];
                 ctx.shadowBlur = 16 + pressAmount * 12;
+                keyGlintRef.current.set(i, Math.min(1, (keyGlintRef.current.get(i) ?? 0) + 0.25));
             } else {
                 const grad = ctx.createLinearGradient(rect.x, finalY, rect.x + rect.width, finalY + rect.height);
-                grad.addColorStop(0, '#27272a');
-                grad.addColorStop(1, '#09090b');
+                grad.addColorStop(0, '#4a4f57');
+                grad.addColorStop(0.5, '#1a1e26');
+                grad.addColorStop(1, '#07090d');
                 ctx.fillStyle = grad;
                 ctx.shadowBlur = 0;
             }
@@ -841,12 +950,37 @@ const PianoRoll: React.FC<PianoRollProps> = ({
             ctx.shadowBlur = 0;
 
             if (colors.length === 0) {
-                ctx.fillStyle = 'rgba(255,255,255,0.1)';
-                ctx.fillRect(rect.x + 2, finalY + 2, rect.width - 4, rect.height * 0.8);
+                const glint = keyGlintRef.current.get(i) ?? 0;
+                const shimmer = 0.5 + 0.5 * Math.sin(now * 0.9 + i * 0.31);
+                const gloss = ctx.createLinearGradient(rect.x + 1, finalY + 2, rect.x + rect.width, finalY + rect.height * 0.8);
+                gloss.addColorStop(0, `rgba(255,255,255,${0.22 + shimmer * 0.08 + glint * 0.2})`);
+                gloss.addColorStop(0.45, 'rgba(255,255,255,0.06)');
+                gloss.addColorStop(1, 'rgba(255,255,255,0)');
+                ctx.fillStyle = gloss;
+                ctx.fillRect(rect.x + 1, finalY + 2, rect.width - 2, rect.height * 0.78);
+
+                const rim = ctx.createLinearGradient(rect.x, finalY, rect.x + rect.width * 0.6, finalY);
+                rim.addColorStop(0, 'rgba(255,255,255,0.12)');
+                rim.addColorStop(1, 'rgba(255,255,255,0)');
+                ctx.fillStyle = rim;
+                ctx.fillRect(rect.x, finalY, rect.width, 2);
             }
+
+            ctx.fillStyle = `rgba(0,0,0,${0.18 + pressAmount * 0.18})`;
+            ctx.fillRect(scaledRect.x + 1, scaledRect.y + scaledRect.h + 1, scaledRect.w - 2, 2);
         }
 
-        ctx.fillStyle = '#ef4444';
+        for (const [midi, amount] of keyGlintRef.current.entries()) {
+            const next = Math.max(0, amount - frameDt * 2.2);
+            if (next <= 0.001) keyGlintRef.current.delete(midi);
+            else keyGlintRef.current.set(midi, next);
+        }
+
+        const strikeLine = ctx.createLinearGradient(0, ROLL_HEIGHT, width, ROLL_HEIGHT + 2);
+        strikeLine.addColorStop(0, '#f97316');
+        strikeLine.addColorStop(0.5, '#ef4444');
+        strikeLine.addColorStop(1, '#f97316');
+        ctx.fillStyle = strikeLine;
         ctx.fillRect(0, ROLL_HEIGHT, width, 2);
     };
 

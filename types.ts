@@ -82,7 +82,8 @@ export interface HighwaySettings {
   lookahead: number; // Seconds visible ahead
   farScale: number; // Perspective scale at horizon (0.0 - 1.0)
   laneShading: boolean;
-  cameraHeight: number; // 0-1, tilts the hit plane
+  cameraHeight: number; // Camera elevation factor for 3D highway perspective
+  highwayLength: number; // 3D highway draw distance in world units
   laneContrast: number; // 0.0 - 1.0, intensity of lane shading
   keyboardMode: '3d' | '2d'; // Toggle for highway keyboard style
 }

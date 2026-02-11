@@ -27,6 +27,19 @@ const ViewSettings: React.FC<ViewSettingsProps> = ({
   onUpdateAnalysisSettings,
   onToggleFullscreen
 }) => {
+  const cameraHeight = highwaySettings.cameraHeight ?? 0.5;
+  const highwayLength = highwaySettings.highwayLength ?? 100;
+
+  const updateCameraHeight = (value: number) => {
+    const clamped = Math.min(Math.max(value, 0.25), 1.25);
+    onUpdateHighwaySettings({ ...highwaySettings, cameraHeight: clamped });
+  };
+
+  const updateHighwayLength = (value: number) => {
+    const clamped = Math.min(Math.max(value, 40), 280);
+    onUpdateHighwaySettings({ ...highwaySettings, highwayLength: clamped });
+  };
+
   return (
     <div className="absolute top-4 right-20 z-40 flex items-center gap-2">
       <button 
@@ -181,6 +194,56 @@ const ViewSettings: React.FC<ViewSettingsProps> = ({
                    onChange={(e) => onUpdateHighwaySettings({...highwaySettings, lookahead: parseFloat(e.target.value)})}
                    className="w-full h-1 bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-primary"
                  />
+               </div>
+
+
+
+               <div>
+                 <div className="flex justify-between text-[10px] text-zinc-400 mb-1">
+                   <span>Camera Height</span>
+                   <span>{cameraHeight.toFixed(2)}x</span>
+                 </div>
+                 <div className="flex items-center gap-2">
+                   <input 
+                     type="range" min="0.25" max="1.25" step="0.01"
+                     value={cameraHeight}
+                     onChange={(e) => updateCameraHeight(parseFloat(e.target.value))}
+                     className="flex-1 h-1 bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-primary"
+                   />
+                   <input
+                     type="number"
+                     min="0.25"
+                     max="1.25"
+                     step="0.01"
+                     value={cameraHeight}
+                     onChange={(e) => updateCameraHeight(parseFloat(e.target.value || '0.5'))}
+                     className="w-16 px-1.5 py-0.5 text-[10px] bg-zinc-900 border border-zinc-700 rounded text-zinc-200"
+                   />
+                 </div>
+               </div>
+
+               <div>
+                 <div className="flex justify-between text-[10px] text-zinc-400 mb-1">
+                   <span>Highway Length</span>
+                   <span>{highwayLength.toFixed(0)}u</span>
+                 </div>
+                 <div className="flex items-center gap-2">
+                   <input 
+                     type="range" min="40" max="280" step="5"
+                     value={highwayLength}
+                     onChange={(e) => updateHighwayLength(parseFloat(e.target.value))}
+                     className="flex-1 h-1 bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-primary"
+                   />
+                   <input
+                     type="number"
+                     min="40"
+                     max="280"
+                     step="5"
+                     value={highwayLength}
+                     onChange={(e) => updateHighwayLength(parseFloat(e.target.value || '100'))}
+                     className="w-16 px-1.5 py-0.5 text-[10px] bg-zinc-900 border border-zinc-700 rounded text-zinc-200"
+                   />
+                 </div>
                </div>
 
                <div>

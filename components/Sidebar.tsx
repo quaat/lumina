@@ -38,7 +38,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   };
 
   return (
-    <div className="w-80 h-full bg-surface border-r border-zinc-800 flex flex-col overflow-hidden">
+    <div className="w-80 h-full neon-panel border-r border-zinc-800 flex flex-col overflow-hidden m-2 mr-0 rounded-xl">
       {/* Header */}
       <div className="p-4 border-b border-zinc-800">
         <div className="flex items-center gap-2 mb-4">
@@ -59,7 +59,7 @@ const Sidebar: React.FC<SidebarProps> = ({
           )}
         </div>
 
-        <label className="flex items-center justify-center w-full px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-sm text-zinc-300 rounded-md cursor-pointer border border-zinc-700 transition-colors">
+        <label className="flex items-center justify-center w-full px-4 py-2 bg-zinc-800/70 hover:bg-zinc-700/80 text-sm text-zinc-300 rounded-md cursor-pointer border border-zinc-700 transition-colors">
           <Upload size={16} className="mr-2" />
           Import MIDI
           <input type="file" accept=".mid,.midi" onChange={handleFileChange} className="hidden" />
@@ -67,7 +67,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       </div>
 
       {/* Settings */}
-      <div className="p-4 border-b border-zinc-800 bg-zinc-900/50">
+      <div className="p-4 border-b border-zinc-800 bg-zinc-900/30">
         <div className="flex items-center gap-2 text-sm text-zinc-400 mb-3">
           <Settings size={14} />
           <span className="font-semibold tracking-wider uppercase text-[10px]">Settings</span>

@@ -10,6 +10,7 @@ interface PlaybackControlsProps {
   onSeek: (time: number) => void;
   playbackRate: number;
   onRateChange: (rate: number) => void;
+  flowScore: number;
 }
 
 const formatTime = (seconds: number) => {
@@ -26,20 +27,34 @@ const PlaybackControls: React.FC<PlaybackControlsProps> = ({
   onStop,
   onSeek,
   playbackRate,
-  onRateChange
+  onRateChange,
+  flowScore
 }) => {
+  const [scorePulse, setScorePulse] = React.useState(false);
+
+  React.useEffect(() => {
+    if (flowScore === 0) return;
+    setScorePulse(true);
+    const timeout = window.setTimeout(() => setScorePulse(false), 200);
+    return () => window.clearTimeout(timeout);
+  }, [flowScore]);
+
   return (
-    <div className="h-16 bg-surface border-t border-zinc-800 flex items-center px-4 justify-between select-none">
+    <div className="h-16 neon-panel border-t border-zinc-800 flex items-center px-4 justify-between select-none rounded-xl mx-2 mb-2">
       {/* Time Display */}
-      <div className="w-24 text-sm font-mono text-zinc-400">
+      <div className="w-24 text-sm font-mono text-zinc-300">
         {formatTime(currentTime)} / {formatTime(duration)}
+      </div>
+
+      <div className={`neon-time ${scorePulse ? 'pulse' : ''} text-xs font-semibold tracking-widest text-cyan-300`}>
+        FLOW {flowScore}
       </div>
 
       {/* Main Transport */}
       <div className="flex items-center gap-4">
         <button 
           onClick={onStop}
-          className="p-2 text-zinc-400 hover:text-white transition-colors"
+          className="transport-button p-2 text-zinc-400 hover:text-white transition-colors rounded-lg"
           title="Stop"
         >
           <Square size={20} fill="currentColor" />
@@ -47,21 +62,25 @@ const PlaybackControls: React.FC<PlaybackControlsProps> = ({
         
         <button 
           onClick={() => onSeek(Math.max(0, currentTime - 5))}
-          className="p-2 text-zinc-400 hover:text-white transition-colors"
+          className="transport-button p-2 text-zinc-400 hover:text-white transition-colors rounded-lg"
         >
           <Rewind size={20} />
         </button>
 
         <button 
           onClick={onPlayPause}
-          className="p-4 bg-primary rounded-full text-white hover:bg-blue-600 shadow-lg shadow-blue-900/50 transition-all hover:scale-105 active:scale-95"
+          className="p-4 rounded-full text-white transition-all hover:scale-105 active:scale-95"
+          style={{
+            background: 'linear-gradient(135deg, var(--neon-cyan), var(--neon-magenta))',
+            boxShadow: '0 0 24px rgba(49, 243, 255, 0.4), 0 0 36px rgba(255, 66, 230, 0.35)'
+          }}
         >
           {isPlaying ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" className="ml-1" />}
         </button>
 
         <button 
           onClick={() => onSeek(Math.min(duration, currentTime + 5))}
-          className="p-2 text-zinc-400 hover:text-white transition-colors"
+          className="transport-button p-2 text-zinc-400 hover:text-white transition-colors rounded-lg"
         >
           <FastForward size={20} />
         </button>
@@ -84,7 +103,7 @@ const PlaybackControls: React.FC<PlaybackControlsProps> = ({
         <select 
           value={playbackRate}
           onChange={(e) => onRateChange(parseFloat(e.target.value))}
-          className="bg-zinc-800 text-zinc-300 text-xs py-1 px-2 rounded border border-zinc-700 focus:outline-none focus:border-primary"
+          className="bg-zinc-800/80 text-zinc-300 text-xs py-1 px-2 rounded border border-zinc-700 focus:outline-none focus:border-primary"
         >
           <option value="0.25">0.25x</option>
           <option value="0.5">0.5x</option>

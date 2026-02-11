@@ -117,6 +117,8 @@ class ParticleSystem {
   }
 }
 
+const HIGHWAY_WORLD_UNITS_PER_SECOND = 25;
+
 const PianoRoll: React.FC<PianoRollProps> = ({
   midiData,
   currentTime,
@@ -186,7 +188,8 @@ const PianoRoll: React.FC<PianoRollProps> = ({
     const { width, height } = dimensions;
     const ROLL_HEIGHT = height - KEYBOARD_HEIGHT;
     const impactY = ROLL_HEIGHT;
-    const horizonY = 0;
+    const cameraHeight = Math.min(Math.max(highwaySettings.cameraHeight ?? 0.5, 0.25), 1.25);
+    const horizonY = impactY * (0.5 - cameraHeight);
     const vanishX = width / 2;
     const farScale = Math.min(Math.max(highwaySettings.farScale, 0.01), 0.99);
 
@@ -307,7 +310,7 @@ const PianoRoll: React.FC<PianoRollProps> = ({
     }
 
     return { whiteLanes, blackLanes, debugLanes, keyboardKeys, impactY, horizonY, vanishX, farScale };
-  }, [layout, dimensions, highwaySettings.farScale, KEYBOARD_HEIGHT, debugMode, highwaySettings.keyboardMode]);
+  }, [layout, dimensions, highwaySettings.farScale, highwaySettings.cameraHeight, KEYBOARD_HEIGHT, debugMode, highwaySettings.keyboardMode]);
 
 
   // Main Render Loop
@@ -457,16 +460,18 @@ const PianoRoll: React.FC<PianoRollProps> = ({
     const drawHighway = () => {
         // --- 1. PROJECTION MATH ---
         const impactY = ROLL_HEIGHT;
-        const horizonY = 0;
+        const cameraHeight = Math.min(Math.max(highwaySettings.cameraHeight ?? 0.5, 0.25), 1.25);
+        const horizonY = impactY * (0.5 - cameraHeight);
         const vanishX = width / 2;
         const lookahead = highwaySettings.lookahead;
+        const highwayLength = Math.min(Math.max(highwaySettings.highwayLength ?? 100, 40), 280);
         // Clamp farScale to avoid division by zero
         const farScale = Math.min(Math.max(highwaySettings.farScale, 0.01), 0.99);
 
         // Z Coordinate System:
         // Z=0 is the "Near Plane" (Hit Line)
-        // Z=Z_RANGE is the "Far Plane" (Horizon)
-        const Z_RANGE = 100; // Arbitrary world units
+        // Z=highwayLength is the configured draw distance
+        const Z_RANGE = highwayLength;
 
         // Calculate Focal Length (F) required to achieve 'farScale' at Z_RANGE
         const focalLength = (farScale * Z_RANGE) / (1 - farScale);
@@ -480,12 +485,10 @@ const PianoRoll: React.FC<PianoRollProps> = ({
          * using constant Z velocity.
          */
         const project = (timeOffset: number) => {
-            // Normalized depth fraction (0 = hit line, 1 = horizon)
-            const fraction = timeOffset / lookahead;
+            // Constant world-space speed keeps timing and lane mapping untouched.
+            const z = timeOffset * HIGHWAY_WORLD_UNITS_PER_SECOND;
 
-            // Linear Z mapping: Distance is proportional to time
-            // This ensures constant speed in world space
-            const z = fraction * Z_RANGE;
+            if (z > Z_RANGE) return null;
 
             // Perspective Divide
             // Z can be negative (passed camera), scale becomes > 1
@@ -545,7 +548,8 @@ const PianoRoll: React.FC<PianoRollProps> = ({
 
         // Render lines up to slightly past lookahead to ensure smooth fade-in
         let t = firstBeat;
-        const maxTime = currentTime + lookahead;
+        const maxVisibleTime = Math.min(lookahead, Z_RANGE / HIGHWAY_WORLD_UNITS_PER_SECOND);
+        const maxTime = currentTime + maxVisibleTime;
 
         while (t < maxTime) {
             const proj = project(t - currentTime);
@@ -574,7 +578,8 @@ const PianoRoll: React.FC<PianoRollProps> = ({
 
             for (const note of track.notes) {
                 // Culling: check simple time bounds first
-                if (note.time > currentTime + lookahead) break; // Optimization: sorted notes
+                if (note.time > currentTime + lookahead) break; // Keep lookahead scheduling bound
+                if (note.time > maxTime) break; // Spatial culling bound
                 if (note.time + note.duration < currentTime) continue;
                 if (note.midi < min || note.midi > max) continue;
 

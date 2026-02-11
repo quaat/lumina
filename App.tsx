@@ -63,6 +63,7 @@ const App: React.FC = () => {
       farScale: 0.25,
       laneShading: true,
       cameraHeight: 0.5,
+      highwayLength: 100,
       laneContrast: 0.5,
       keyboardMode: '3d'
   });

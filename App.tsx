@@ -31,6 +31,12 @@ interface PlaybackHistoryState {
   playbackRate: number;
 }
 
+interface ImpactBurst {
+  id: number;
+  midi: number;
+  intensity: number;
+}
+
 const noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 const midiToNoteName = (midi: number) => {
   const note = noteNames[midi % 12];
@@ -81,6 +87,8 @@ const App: React.FC = () => {
   const [playbackRate, setPlaybackRate] = useState(1);
   const [highlightState, setHighlightState] = useState(() => createHighlightState());
   const activeNotes = useMemo(() => buildActiveNotesSet(highlightState), [highlightState]);
+  const [impactBursts, setImpactBursts] = useState<ImpactBurst[]>([]);
+  const [flowScore, setFlowScore] = useState(0);
   
   // History State
   const [history, setHistory] = useState<PlaybackHistoryState[]>([]);
@@ -104,6 +112,7 @@ const App: React.FC = () => {
   const schedulerTimerRef = useRef<number | null>(null);
   const rafRef = useRef<number | null>(null);
   const highlightQueueRef = useRef<Array<HighlightEvent>>([]);
+  const burstCounterRef = useRef(0);
 
   // --- ANALYSIS TRIGGER ---
   useEffect(() => {
@@ -441,6 +450,22 @@ const App: React.FC = () => {
       } 
       // Note On
       else if (command === 0x90 && data2 > 0) {
+        const isMatchedWithPlayback = Array.from(activeNotes).some((entry) => {
+          const [source, noteValue] = entry.split(':');
+          return source !== 'input' && Number(noteValue) === data1;
+        });
+
+        if (isMatchedWithPlayback) {
+          burstCounterRef.current += 1;
+          const burst: ImpactBurst = {
+            id: burstCounterRef.current,
+            midi: data1,
+            intensity: Math.min(1.4, 0.6 + data2 / 127)
+          };
+          setImpactBursts(prev => [...prev, burst]);
+          setFlowScore(prev => prev + 10);
+        }
+
         setHighlightState(prev => applyHighlightEvents(prev, [{
           type: 'on',
           noteNumber: data1,
@@ -469,7 +494,15 @@ const App: React.FC = () => {
 
     webMidiService.addMessageListener(handleMidiMessage);
     return () => webMidiService.removeMessageListener(handleMidiMessage);
-  }, [inputId, isPlaying, outputSettings]); 
+  }, [inputId, isPlaying, outputSettings, activeNotes]); 
+
+  useEffect(() => {
+    if (impactBursts.length === 0) return;
+    const timeout = window.setTimeout(() => {
+      setImpactBursts(prev => prev.slice(1));
+    }, 420);
+    return () => window.clearTimeout(timeout);
+  }, [impactBursts]);
 
   // --- SCHEDULER ---
   const getNow = () => performance.now();
@@ -733,7 +766,7 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="flex h-screen w-screen bg-background text-zinc-100 overflow-hidden font-sans">
+    <div className="neon-flow-app flex h-screen w-screen bg-background text-zinc-100 overflow-hidden font-sans">
       {!isVizFullscreen && (
         <Sidebar 
           tracks={midiData?.tracks || []}
@@ -779,7 +812,7 @@ const App: React.FC = () => {
         )}
 
         {/* Visualization Container - Targeted for Fullscreen */}
-        <div ref={vizContainerRef} className="flex-1 relative bg-zinc-950 flex flex-col">
+        <div ref={vizContainerRef} className="flex-1 relative bg-zinc-950/40 flex flex-col neon-panel rounded-xl m-2 overflow-hidden">
           {!midiData ? (
             <div className="absolute inset-0 flex flex-col items-center justify-center text-zinc-500 border-2 border-dashed border-zinc-800 m-8 rounded-2xl">
               <h2 className="text-2xl font-light mb-2 text-zinc-300">Welcome to Lumina</h2>
@@ -842,6 +875,7 @@ const App: React.FC = () => {
                   colorMode={colorMode}
                   highwaySettings={highwaySettings}
                   isFullscreen={isVizFullscreen}
+                  impactBursts={impactBursts}
                 />
             </>
           )}
@@ -857,6 +891,7 @@ const App: React.FC = () => {
             onSeek={handleSeek}
             playbackRate={playbackRate}
             onRateChange={handleRateChange}
+            flowScore={flowScore}
           />
         )}
       </div>

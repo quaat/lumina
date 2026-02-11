@@ -62,6 +62,6 @@ describe('PianoRoll', () => {
     );
 
     expect(html).toContain('<canvas');
-    expect(html).toContain('class="block"');
+    expect(html).toContain('class="block w-full h-full"');
   });
 });

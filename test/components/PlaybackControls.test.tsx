@@ -15,6 +15,7 @@ describe('PlaybackControls', () => {
         onSeek={() => {}}
         playbackRate={1}
         onRateChange={() => {}}
+        flowScore={0}
       />
     );
 

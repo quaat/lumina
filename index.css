@@ -1,0 +1,93 @@
+:root {
+  --bg-void: #06040d;
+  --bg-core: #0e0a1b;
+  --bg-elevated: rgba(20, 16, 37, 0.78);
+  --bg-panel: rgba(17, 14, 32, 0.66);
+  --line-subtle: rgba(103, 89, 147, 0.35);
+  --text-main: #f1ecff;
+  --text-dim: #a39bc4;
+  --neon-cyan: #31f3ff;
+  --neon-magenta: #ff42e6;
+  --neon-lime: #b7ff37;
+  --neon-blue: #5d8dff;
+  --glow-soft: 0 0 20px rgba(49, 243, 255, 0.2), 0 0 34px rgba(255, 66, 230, 0.16);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  color: var(--text-main);
+  font-family: 'Orbitron', 'Roboto Mono', 'Inter', system-ui, sans-serif;
+  overflow: hidden;
+  background:
+    radial-gradient(120% 90% at 15% 5%, rgba(255, 66, 230, 0.22), transparent 55%),
+    radial-gradient(90% 70% at 85% 0%, rgba(49, 243, 255, 0.16), transparent 60%),
+    radial-gradient(65% 90% at 50% 100%, rgba(99, 102, 241, 0.18), transparent 60%),
+    linear-gradient(180deg, var(--bg-core) 0%, var(--bg-void) 100%);
+  animation: nebulaShift 20s ease-in-out infinite alternate;
+}
+
+#root { height: 100vh; }
+
+.neon-flow-app {
+  position: relative;
+  isolation: isolate;
+}
+
+.neon-flow-app::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(110, 96, 162, 0.18) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(110, 96, 162, 0.18) 1px, transparent 1px);
+  background-size: 54px 54px;
+  transform: perspective(520px) rotateX(70deg) translateY(38%);
+  transform-origin: 50% 0;
+  opacity: 0.25;
+  animation: gridDrift 26s linear infinite;
+  z-index: -1;
+  pointer-events: none;
+}
+
+.neon-panel {
+  background: var(--bg-panel);
+  backdrop-filter: blur(14px) saturate(1.2);
+  border: 1px solid var(--line-subtle);
+  box-shadow: var(--glow-soft), inset 0 1px 0 rgba(255,255,255,0.08);
+}
+
+.neon-time {
+  transition: transform 160ms ease, text-shadow 220ms ease;
+}
+
+.neon-time.pulse {
+  transform: scale(1.08);
+  text-shadow: 0 0 12px rgba(49, 243, 255, 0.5), 0 0 20px rgba(255, 66, 230, 0.35);
+}
+
+.transport-button {
+  border: 1px solid rgba(130, 114, 182, 0.45);
+  background: rgba(14, 12, 28, 0.88);
+  box-shadow: inset 0 0 10px rgba(255,255,255,0.05);
+}
+
+.transport-button:hover {
+  box-shadow: 0 0 16px rgba(49, 243, 255, 0.18), inset 0 0 14px rgba(255,255,255,0.08);
+}
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: #0a0914; }
+::-webkit-scrollbar-thumb { background: #2d2843; border-radius: 8px; }
+::-webkit-scrollbar-thumb:hover { background: #463d68; }
+
+@keyframes gridDrift {
+  from { transform: perspective(520px) rotateX(70deg) translateY(38%) translateX(0); }
+  to { transform: perspective(520px) rotateX(70deg) translateY(38%) translateX(54px); }
+}
+
+@keyframes nebulaShift {
+  from { filter: hue-rotate(0deg) saturate(1); }
+  to { filter: hue-rotate(14deg) saturate(1.1); }
+}

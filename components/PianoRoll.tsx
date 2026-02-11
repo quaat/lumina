@@ -30,6 +30,7 @@ interface KeyboardKeyGeometry {
 
 
 interface Particle {
+  active: boolean;
   x: number;
   y: number;
   vx: number;
@@ -42,6 +43,31 @@ interface Particle {
 
 class ParticleSystem {
   private particles: Particle[] = [];
+  private pool: Particle[] = [];
+
+  private obtainParticle(): Particle {
+    const reused = this.pool.pop();
+    if (reused) {
+      reused.active = true;
+      return reused;
+    }
+    return {
+      active: true,
+      x: 0,
+      y: 0,
+      vx: 0,
+      vy: 0,
+      life: 0,
+      maxLife: 0,
+      radius: 1,
+      color: '#ffffff'
+    };
+  }
+
+  private recycleParticle(particle: Particle) {
+    particle.active = false;
+    this.pool.push(particle);
+  }
 
   addBurst(x: number, y: number, intensity: number) {
     const count = Math.floor(18 + intensity * 22);
@@ -49,30 +75,37 @@ class ParticleSystem {
     for (let i = 0; i < count; i++) {
       const angle = Math.random() * Math.PI * 2;
       const speed = 60 + Math.random() * 180 * intensity;
-      this.particles.push({
-        x,
-        y,
-        vx: Math.cos(angle) * speed,
-        vy: Math.sin(angle) * speed - (20 + Math.random() * 40),
-        life: 0,
-        maxLife: 0.25 + Math.random() * 0.45,
-        radius: 1 + Math.random() * 3,
-        color: palette[i % palette.length]
-      });
+      const particle = this.obtainParticle();
+      particle.x = x;
+      particle.y = y;
+      particle.vx = Math.cos(angle) * speed;
+      particle.vy = Math.sin(angle) * speed - (20 + Math.random() * 40);
+      particle.life = 0;
+      particle.maxLife = 0.25 + Math.random() * 0.45;
+      particle.radius = 1 + Math.random() * 3;
+      particle.color = palette[i % palette.length];
+      this.particles.push(particle);
     }
   }
 
   update(dt: number) {
-    this.particles = this.particles.filter((p) => {
+    for (let i = this.particles.length - 1; i >= 0; i--) {
+      const p = this.particles[i];
       p.life += dt;
       p.vy += 380 * dt;
       p.x += p.vx * dt;
       p.y += p.vy * dt;
-      return p.life < p.maxLife;
-    });
+      if (p.life >= p.maxLife) {
+        this.particles.splice(i, 1);
+        this.recycleParticle(p);
+      }
+    }
   }
 
   draw(ctx: CanvasRenderingContext2D) {
+    if (this.particles.length === 0) return;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
     for (const p of this.particles) {
       const alpha = 1 - p.life / p.maxLife;
       ctx.fillStyle = `${p.color}${Math.round(alpha * 255).toString(16).padStart(2, '0')}`;
@@ -80,13 +113,14 @@ class ParticleSystem {
       ctx.arc(p.x, p.y, p.radius * (0.8 + alpha), 0, Math.PI * 2);
       ctx.fill();
     }
+    ctx.restore();
   }
 }
 
-const PianoRoll: React.FC<PianoRollProps> = ({ 
-  midiData, 
-  currentTime, 
-  isPlaying, 
+const PianoRoll: React.FC<PianoRollProps> = ({
+  midiData,
+  currentTime,
+  isPlaying,
   zoom,
   activeNotes,
   debugMode = false,
@@ -102,6 +136,7 @@ const PianoRoll: React.FC<PianoRollProps> = ({
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
   const particlesRef = useRef(new ParticleSystem());
   const lastFrameRef = useRef(performance.now());
+  const keyPressRef = useRef(new Map<number, number>());
 
   // Fixed keyboard height - always visible
   const KEYBOARD_HEIGHT = 100;
@@ -171,7 +206,7 @@ const PianoRoll: React.FC<PianoRollProps> = ({
     const KEY_THICKNESS = 15;
     const BLACK_KEY_LIFT = 6;
     const BLACK_KEY_LENGTH_MOD = 0.65;
-    
+
     // Y-Planes (only relevant if keyboard is visible)
     const yKeyBack = impactY;
     const yKeyFront = height - KEY_THICKNESS;
@@ -199,7 +234,7 @@ const PianoRoll: React.FC<PianoRollProps> = ({
         } else {
             whiteLanes.push(path);
         }
-        
+
         if (debugMode && i % 12 === 0) {
             debugLanes.push({ key: i, path, isBlack: rect.isBlack });
         }
@@ -208,11 +243,11 @@ const PianoRoll: React.FC<PianoRollProps> = ({
         if (highwaySettings.keyboardMode === '3d') {
             if (!rect.isBlack) {
                 // White Key
-                const xBL = nearL; 
+                const xBL = nearL;
                 const xBR = nearR;
                 const xFL = vanishX + (nearL - vanishX) * scaleFront;
                 const xFR = vanishX + (nearR - vanishX) * scaleFront;
-                
+
                 keyboardKeys.push({
                     midi: i,
                     isBlack: false,
@@ -233,15 +268,15 @@ const PianoRoll: React.FC<PianoRollProps> = ({
                 // Black Key
                 const yBlackFrontRaw = yKeyBack + (yKeyFront - yKeyBack) * BLACK_KEY_LENGTH_MOD;
                 const scaleBlackFront = getScaleAtY(yBlackFrontRaw);
-                
+
                 const yB = yKeyBack - BLACK_KEY_LIFT;
                 const yF = yBlackFrontRaw - BLACK_KEY_LIFT;
-                
+
                 const xBL = nearL;
                 const xBR = nearR;
                 const xFL = vanishX + (nearL - vanishX) * scaleBlackFront;
                 const xFR = vanishX + (nearR - vanishX) * scaleBlackFront;
-                
+
                 const shadowPoly = [
                      { x: xBL + 2, y: yKeyBack },
                      { x: xBR + 2, y: yKeyBack },
@@ -284,7 +319,7 @@ const PianoRoll: React.FC<PianoRollProps> = ({
 
     const { width, height } = dimensions;
     const pixelRatio = window.devicePixelRatio;
-    
+
     // Scale context for DPI
     ctx.resetTransform();
     ctx.scale(pixelRatio, pixelRatio);
@@ -304,7 +339,7 @@ const PianoRoll: React.FC<PianoRollProps> = ({
         if (activeNotes.has(`input:${key}`)) {
             colors.push(colorMode === 'note' ? getPitchClassColor(key) : '#60a5fa');
         }
-        
+
         // Track notes
         midiData.tracks.forEach(t => {
             if (t.isHidden) return; // Strict check: hidden tracks don't highlight
@@ -330,7 +365,7 @@ const PianoRoll: React.FC<PianoRollProps> = ({
                 // Subtle alternating lane color
                 ctx.fillStyle = (i % 2 === 0) ? 'rgba(49,243,255,0.06)' : 'rgba(255,66,230,0.05)';
                 ctx.fillRect(rect.x, 0, rect.width, ROLL_HEIGHT);
-                
+
                 // Borders
                 ctx.strokeStyle = 'rgba(126, 106, 182, 0.3)';
                 ctx.lineWidth = 1;
@@ -376,21 +411,43 @@ const PianoRoll: React.FC<PianoRollProps> = ({
                 const yTop = yBottom - barHeight;
 
                 const color = getNoteColor(note.midi, track.color);
-                const glass = ctx.createLinearGradient(x, yTop, x + w, yBottom);
-                glass.addColorStop(0, `${color}dd`);
-                glass.addColorStop(1, `${color}88`);
+                const noteWidth = w - 1;
+                const sheenCycle = (performance.now() * 0.0018 + note.midi * 0.12) % 1;
+                const sheenY = yTop + sheenCycle * barHeight;
 
-                ctx.fillStyle = glass;
-                ctx.globalAlpha = 0.9;
+                // Keep original base color fill
+                ctx.fillStyle = color;
+                ctx.globalAlpha = 0.82;
+                ctx.fillRect(x, yTop, noteWidth, barHeight);
+
+                // Additive neon bloom (visual-only)
+                ctx.globalAlpha = 0.38;
                 ctx.shadowColor = color;
                 ctx.shadowBlur = 14;
-                ctx.fillRect(x, yTop, w - 1, barHeight);
+                ctx.fillRect(x, yTop, noteWidth, barHeight);
                 ctx.shadowBlur = 0;
-                
+
+                // Edge lighting
+                ctx.globalAlpha = 0.8;
+                ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+                ctx.lineWidth = 1;
+                ctx.strokeRect(x + 0.5, yTop + 0.5, Math.max(0, noteWidth - 1), Math.max(0, barHeight - 1));
+
+                // Glass overlay + subtle moving sheen
+                ctx.fillStyle = 'rgba(255,255,255,0.11)';
+                ctx.fillRect(x + 1, yTop + 1, Math.max(0, noteWidth - 2), Math.min(4, barHeight * 0.15));
+                ctx.fillStyle = 'rgba(255,255,255,0.08)';
+                ctx.fillRect(x + 1, sheenY, Math.max(0, noteWidth - 2), 2);
+
+                // Faint comet trail behind falling note
+                const trailHeight = Math.min(16, barHeight * 0.4);
+                ctx.fillStyle = `${color}44`;
+                ctx.fillRect(x + noteWidth * 0.2, yTop - trailHeight, noteWidth * 0.6, trailHeight);
+
                 // Inner "shine"
                 ctx.fillStyle = '#ffffff';
                 ctx.globalAlpha = 0.3;
-                ctx.fillRect(x, yTop, w - 1, 2); 
+                ctx.fillRect(x, yTop, w - 1, 2);
                 ctx.globalAlpha = 1.0;
             }
         });
@@ -399,7 +456,7 @@ const PianoRoll: React.FC<PianoRollProps> = ({
     const drawHighway = () => {
         // --- 1. PROJECTION MATH ---
         const impactY = ROLL_HEIGHT;
-        const horizonY = 0; 
+        const horizonY = 0;
         const vanishX = width / 2;
         const lookahead = highwaySettings.lookahead;
         // Clamp farScale to avoid division by zero
@@ -409,7 +466,7 @@ const PianoRoll: React.FC<PianoRollProps> = ({
         // Z=0 is the "Near Plane" (Hit Line)
         // Z=Z_RANGE is the "Far Plane" (Horizon)
         const Z_RANGE = 100; // Arbitrary world units
-        
+
         // Calculate Focal Length (F) required to achieve 'farScale' at Z_RANGE
         const focalLength = (farScale * Z_RANGE) / (1 - farScale);
 
@@ -424,18 +481,18 @@ const PianoRoll: React.FC<PianoRollProps> = ({
         const project = (timeOffset: number) => {
             // Normalized depth fraction (0 = hit line, 1 = horizon)
             const fraction = timeOffset / lookahead;
-            
+
             // Linear Z mapping: Distance is proportional to time
             // This ensures constant speed in world space
             const z = fraction * Z_RANGE;
-            
+
             // Perspective Divide
             // Z can be negative (passed camera), scale becomes > 1
             // Use epsilon to prevent singularity explosion
             if (focalLength + z < 0.5) return null; // Behind camera or too close
-            
+
             const scale = focalLength / (focalLength + z);
-            
+
             // Map to Screen Y using derived constants
             const y = yVanish + yK * scale;
 
@@ -447,7 +504,7 @@ const PianoRoll: React.FC<PianoRollProps> = ({
         // 1. Background / Sky
         ctx.fillStyle = '#070511';
         ctx.fillRect(0, 0, width, height);
-        
+
         // Horizon Glow
         const grad = ctx.createLinearGradient(0, 0, 0, height/2);
         grad.addColorStop(0, '#18181b');
@@ -458,20 +515,20 @@ const PianoRoll: React.FC<PianoRollProps> = ({
         // 2. Lanes (Key-type shading)
         if (highwaySettings.laneShading && laneGeometry) {
             const contrast = highwaySettings.laneContrast ?? 0.5;
-            
+
             // Pass 1: White Key Lanes (Base)
             // Increased opacity for visibility without outlines
-            const whiteAlpha = 0.06 + (contrast * 0.15); 
+            const whiteAlpha = 0.06 + (contrast * 0.15);
             ctx.fillStyle = `rgba(255, 255, 255, ${whiteAlpha})`;
-            
+
             for (const path of laneGeometry.whiteLanes) {
                 ctx.fill(path);
             }
-            
+
             // Pass 2: Black Key Lanes (Overlay)
-            const blackAlpha = 0.2 + (contrast * 0.4); 
+            const blackAlpha = 0.2 + (contrast * 0.4);
             ctx.fillStyle = `rgba(0, 0, 0, ${blackAlpha})`;
-            
+
             for (const path of laneGeometry.blackLanes) {
                 ctx.fill(path);
             }
@@ -480,11 +537,11 @@ const PianoRoll: React.FC<PianoRollProps> = ({
         // 3. Grid Lines (Horizontal beats)
         const beatInterval = 60 / midiData.header.tempo;
         const firstBeat = Math.ceil(currentTime / beatInterval) * beatInterval;
-        
+
         ctx.strokeStyle = 'rgba(255,255,255,0.1)';
         ctx.lineWidth = 1;
         ctx.beginPath();
-        
+
         // Render lines up to slightly past lookahead to ensure smooth fade-in
         let t = firstBeat;
         const maxTime = currentTime + lookahead;
@@ -497,10 +554,10 @@ const PianoRoll: React.FC<PianoRollProps> = ({
                 if (minRect && maxRect) {
                     const nearLeft = minRect.x;
                     const nearRight = maxRect.x + maxRect.width;
-                    
+
                     const xL = vanishX + (nearLeft - vanishX) * proj.scale;
                     const xR = vanishX + (nearRight - vanishX) * proj.scale;
-                    
+
                     ctx.moveTo(xL, proj.y);
                     ctx.lineTo(xR, proj.y);
                 }
@@ -524,11 +581,11 @@ const PianoRoll: React.FC<PianoRollProps> = ({
                 const relativeEnd = note.time + note.duration - currentTime;
 
                 // Project endpoints using constant Z velocity
-                let pStart = project(relativeStart); 
-                const projEnd = project(relativeEnd);     
+                let pStart = project(relativeStart);
+                const projEnd = project(relativeEnd);
 
                 if (!projEnd) continue;
-                
+
                 // If start is behind camera, handle fallback with consistent geometry
                 if (!pStart) {
                      const targetY = height + 100; // A bit below visible area
@@ -539,9 +596,9 @@ const PianoRoll: React.FC<PianoRollProps> = ({
                          z: -100 // dummy
                      };
                 }
-                
+
                 // Don't render if both are behind camera logic (though culling handles most)
-                if (projEnd.scale > 50) continue; 
+                if (projEnd.scale > 50) continue;
 
                 const rect = layout.getKeyRect(note.midi);
                 if (!rect) continue;
@@ -565,7 +622,7 @@ const PianoRoll: React.FC<PianoRollProps> = ({
                 const yT = projEnd.y;
 
                 const color = getNoteColor(note.midi, track.color);
-                
+
                 ctx.beginPath();
                 ctx.moveTo(xBL, yB);
                 ctx.lineTo(xBR, yB);
@@ -573,16 +630,21 @@ const PianoRoll: React.FC<PianoRollProps> = ({
                 ctx.lineTo(xTL, yT);
                 ctx.closePath();
 
-                const grad = ctx.createLinearGradient(0, Math.min(yB, height), 0, Math.max(yT, 0));
-                grad.addColorStop(0, color);
-                grad.addColorStop(1, `${color}88`);
-                
-                ctx.fillStyle = grad;
-                ctx.globalAlpha = 0.9;
+                // Keep original base color fill
+                ctx.fillStyle = color;
+                ctx.globalAlpha = 0.82;
                 ctx.fill();
 
-                ctx.strokeStyle = '#ffffffaa';
-                ctx.lineWidth = 1.5 * pStart.scale; 
+                // Neon bloom
+                ctx.globalAlpha = 0.33;
+                ctx.shadowColor = color;
+                ctx.shadowBlur = 12;
+                ctx.fill();
+                ctx.shadowBlur = 0;
+
+                // Edge lighting
+                ctx.strokeStyle = 'rgba(255,255,255,0.75)';
+                ctx.lineWidth = Math.max(1, 1.25 * pStart.scale);
                 ctx.stroke();
 
                 // Impact Flash
@@ -621,21 +683,21 @@ const PianoRoll: React.FC<PianoRollProps> = ({
         const gradWhite = ctx.createLinearGradient(0, laneGeometry.impactY, 0, height);
         gradWhite.addColorStop(0, '#d4d4d8'); // darker at back
         gradWhite.addColorStop(1, '#ffffff'); // brighter at front
-        
+
         // Black Key Top
         const gradBlack = ctx.createLinearGradient(0, laneGeometry.impactY, 0, height);
-        gradBlack.addColorStop(0, '#18181b'); 
+        gradBlack.addColorStop(0, '#18181b');
         gradBlack.addColorStop(1, '#27272a');
 
         // Draw White Keys first
         keyboardKeys.filter(k => !k.isBlack).forEach(key => {
             const activeColors = getActiveColors(key.midi);
-            
+
             // Top Surface
             if (activeColors.length > 0) {
                  ctx.fillStyle = activeColors[0];
                  drawPoly(key.topPoly, activeColors[0]);
-                 
+
                  // Glow
                  ctx.shadowColor = activeColors[0];
                  ctx.shadowBlur = 15;
@@ -644,7 +706,7 @@ const PianoRoll: React.FC<PianoRollProps> = ({
             } else {
                  drawPoly(key.topPoly, gradWhite);
             }
-            
+
             // Front Face (Thickness)
             drawPoly(key.frontPoly, '#a1a1aa'); // Darker grey for depth
         });
@@ -662,7 +724,7 @@ const PianoRoll: React.FC<PianoRollProps> = ({
             if (activeColors.length > 0) {
                  ctx.fillStyle = activeColors[0];
                  drawPoly(key.topPoly, activeColors[0]);
-                 
+
                  ctx.shadowColor = activeColors[0];
                  ctx.shadowBlur = 15;
                  drawPoly(key.topPoly, `rgba(255,255,255,0.2)`);
@@ -670,15 +732,39 @@ const PianoRoll: React.FC<PianoRollProps> = ({
             } else {
                  drawPoly(key.topPoly, gradBlack);
             }
-            
+
             // Front Face
             drawPoly(key.frontPoly, '#09090b'); // Very dark for black key front
         });
     };
 
+    let frameDt = 0.016;
+
     const draw2DKeyboard = () => {
         const keyboardOriginY = ROLL_HEIGHT;
-      
+
+        const updatePressAmount = (midi: number, isActive: boolean) => {
+            const current = keyPressRef.current.get(midi) ?? 0;
+            const target = isActive ? 1 : 0;
+            const attack = 0.11;
+            const release = 0.16;
+            const factor = Math.min(1, frameDt / (isActive ? attack : release));
+            const next = current + (target - current) * factor;
+            keyPressRef.current.set(midi, next);
+            return next;
+        };
+
+        const getScaledRect = (x: number, y: number, w: number, h: number, scale: number) => {
+            const nw = w * scale;
+            const nh = h * scale;
+            return {
+                x: x + (w - nw) / 2,
+                y: y + (h - nh) / 2,
+                w: nw,
+                h: nh
+            };
+        };
+
         // Pass 1: White
         for (let i = min; i <= max; i++) {
             const rect = layout.getKeyRect(i);
@@ -686,8 +772,10 @@ const PianoRoll: React.FC<PianoRollProps> = ({
 
             const colors = getActiveColors(i);
             const finalY = keyboardOriginY + rect.y;
-            
-            const pressInset = colors.length > 0 ? 1.5 : 0;
+
+            const pressAmount = updatePressAmount(i, colors.length > 0);
+            const pressScale = 1 - 0.03 * pressAmount;
+            const scaledRect = getScaledRect(rect.x + 1, finalY, rect.width - 2, rect.height, pressScale);
             if (colors.length > 0) {
                 if (colors.length === 1) {
                     ctx.fillStyle = colors[0];
@@ -698,17 +786,17 @@ const PianoRoll: React.FC<PianoRollProps> = ({
                     });
                     ctx.fillStyle = gradient;
                 }
-                
+
                 ctx.shadowColor = colors[0];
-                ctx.shadowBlur = 20;
-                ctx.fillRect(rect.x + 1, finalY + pressInset, rect.width - 2, rect.height - pressInset);
+                ctx.shadowBlur = 16 + pressAmount * 12;
+                ctx.fillRect(scaledRect.x, scaledRect.y, scaledRect.w, scaledRect.h);
                 ctx.shadowBlur = 0;
-                
+
                 const grad = ctx.createLinearGradient(0, finalY, 0, finalY + rect.height);
                 grad.addColorStop(0, 'rgba(255,255,255,0.4)');
                 grad.addColorStop(1, 'rgba(255,255,255,0.0)');
                 ctx.fillStyle = grad;
-                ctx.fillRect(rect.x + 1, finalY + pressInset, rect.width - 2, rect.height - pressInset);
+                ctx.fillRect(scaledRect.x, scaledRect.y, scaledRect.w, scaledRect.h);
 
             } else {
                 ctx.fillStyle = '#f4f4f5';
@@ -726,7 +814,9 @@ const PianoRoll: React.FC<PianoRollProps> = ({
             const colors = getActiveColors(i);
             const finalY = keyboardOriginY + rect.y;
 
-            const pressInset = colors.length > 0 ? 1.5 : 0;
+            const pressAmount = updatePressAmount(i, colors.length > 0);
+            const pressScale = 1 - 0.03 * pressAmount;
+            const scaledRect = getScaledRect(rect.x, finalY, rect.width, rect.height, pressScale);
             if (colors.length > 0) {
                  if (colors.length === 1) {
                     ctx.fillStyle = colors[0];
@@ -738,7 +828,7 @@ const PianoRoll: React.FC<PianoRollProps> = ({
                     ctx.fillStyle = gradient;
                 }
                 ctx.shadowColor = colors[0];
-                ctx.shadowBlur = 20;
+                ctx.shadowBlur = 16 + pressAmount * 12;
             } else {
                 const grad = ctx.createLinearGradient(rect.x, finalY, rect.x + rect.width, finalY + rect.height);
                 grad.addColorStop(0, '#27272a');
@@ -746,8 +836,8 @@ const PianoRoll: React.FC<PianoRollProps> = ({
                 ctx.fillStyle = grad;
                 ctx.shadowBlur = 0;
             }
-            
-            ctx.fillRect(rect.x, finalY + (colors.length > 0 ? pressInset : 0), rect.width, rect.height - (colors.length > 0 ? pressInset : 0));
+
+            ctx.fillRect(scaledRect.x, scaledRect.y, scaledRect.w, scaledRect.h);
             ctx.shadowBlur = 0;
 
             if (colors.length === 0) {
@@ -755,27 +845,28 @@ const PianoRoll: React.FC<PianoRollProps> = ({
                 ctx.fillRect(rect.x + 2, finalY + 2, rect.width - 4, rect.height * 0.8);
             }
         }
-        
-        ctx.fillStyle = '#ef4444'; 
+
+        ctx.fillStyle = '#ef4444';
         ctx.fillRect(0, ROLL_HEIGHT, width, 2);
     };
 
     const draw = () => {
+        const now = performance.now();
+        const dt = Math.min(0.05, (now - lastFrameRef.current) / 1000);
+        frameDt = dt;
+        lastFrameRef.current = now;
+
         if (viewMode === 'classic') {
             drawClassic();
         } else {
             drawHighway();
         }
-        
+
         if (viewMode === 'highway' && highwaySettings.keyboardMode === '3d') {
             draw3DKeyboard();
         } else {
             draw2DKeyboard();
         }
-
-        const now = performance.now();
-        const dt = Math.min(0.05, (now - lastFrameRef.current) / 1000);
-        lastFrameRef.current = now;
         particlesRef.current.update(dt);
         particlesRef.current.draw(ctx);
     };
